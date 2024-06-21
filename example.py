@@ -22,7 +22,7 @@ import os, webbrowser  # to show post-processed results in the browser
 
 ### input
 suite_name = "bbob"
-output_folder = "optimize-fmin"
+output_folder = "scipy-optimize-fmin"
 fmin = scipy.optimize.fmin
 budget_multiplier = 1  # increase to 10, 100, ...
 
@@ -42,7 +42,7 @@ for problem in suite:  # this loop will take several minutes or longer
         x0 = problem.lower_bounds + ((rand(problem.dimension) + rand(problem.dimension)) *
                     (problem.upper_bounds - problem.lower_bounds) / 2)
     minimal_print(problem, final=problem.index == len(suite) - 1)
-    break
+
 ### post-process data
 cocopp.main(observer.result_folder)  # re-run folders look like "...-001" etc
 webbrowser.open("file://" + os.getcwd() + "/ppdata/index.html")

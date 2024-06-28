@@ -19,6 +19,7 @@ import cocoex, cocopp  # experimentation and post-processing modules
 import scipy.optimize  # to define the solver to be benchmarked
 from numpy.random import rand  # for randomised restarts
 import os, webbrowser  # to show post-processed results in the browser
+import sys
 import GP
 import VAE
 import evo
@@ -26,6 +27,12 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
 import numpy as np
 import tensorflow as tf
+from sklearn.decomposition import PCA
+import tensorflow_addons as tfa
+import sklearn.gaussian_process.kernels as GPK
+import progress_bar
+from scipy.linalg import pinv
+import math
 
 
 def main():
@@ -43,55 +50,65 @@ def main():
 
     use_surrogate = False
     for problem in suite:  # this loop will take several minutes or longer
-        if problem.dimension <300: continue
+        if problem.dimension <100: continue
         print(f'---------------------------------------------------dim: {problem.dimension}')
         
         
         d = problem.dimension
-        layers = [d/4,d/4]
+        layers = [d/4]
         
-        inp = tf.keras.layers.Input(shape=(d))
+        inp = tf.keras.layers.Input(shape=d)
         feed = inp
         for n in layers:
             feed = tf.keras.layers.Dense(n, activation='relu')(feed)# + (int(feed.shape[-1] == n) * feed if feed.shape[-1] == n else 0)
             # feed = tf.keras.layers.Dropout(0.2)(feed)
         feed = tf.keras.layers.Dense(1)(feed)
         mlp = tf.keras.Model(inputs=inp,outputs=feed)
-        mlp.compile(optimizer='adam',loss = 'mse')
+        mlp.compile(optimizer=tfa.optimizers.AdamW(1e-4),loss = 'mse')
 
        
-        model = VAE.CVAE(d,layers)
-        model.compile(optimizer='adam')
-
-        def get_surrogate(trainxy):
-            nonlocal model
-            train_x,train_y = zip(*trainxy)
+        cvae = VAE.CVAE(d,layers)
+        cvae.compile(optimizer=tfa.optimizers.AdamW(1e-4))
+        
+        def get_surrogate(train_x, train_y):
             d = problem.dimension
-            layers = [d/4,d/4]
             X = np.array(train_x)
             Y = np.array(train_y)
-            # model.fit(X,X,batch_size = 8,epochs=10,verbose=0,metrics=['mse'])
-            
+            dim_red = lambda a:a
 
-            
-            #model.fit(X,Y,batch_size = 8,epochs=10,verbose=1)
-            # latent_X = model(X) 
-            
-            
-            latent_X =X 
-            # gpr = GaussianProcessRegressor(1**2 * RBF(length_scale=1.0),n_restarts_optimizer=10).fit(latent_X, Y)
+            # VAE
+            # cvae.fit(X,X,batch_size = 4,epochs=10,verbose=0)
+            # dim_red = cvae
 
-            def predict(x):
-                # y = model(x)
-                # latent = model(x)
-                # y = gpr.predict(x)
-                r = []
-                for a in list(x):
-                    y = GP.gaussian_process_predict_mean(X,Y,a)
-                    r.append(y)
-                y = np.array(r)
-                return y
-            return predict   
+            # PCA
+            # pca = PCA(50).fit(X)
+            # dim_red = lambda a: pca.predict(a)
+            # print(pca.explained_variance_ratio_.sum())
+
+
+            latentX = dim_red(X)
+
+
+            # MLP            
+            # mlp.fit(latentX,Y,batch_size = 4,epochs=20,verbose=0)
+            # model = mlp
+
+
+            # ELM
+            input_weights = np.random.normal(size=[d,int(2*d)])
+            biases = np.random.normal(size=[int(2*d)])
+            h = lambda a: np.maximum(np.dot(a, input_weights) + biases,0)
+            output_weights = np.dot(pinv(h(latentX)), Y)
+            model = lambda a: np.dot(h(a), output_weights)
+ 
+
+            # GP
+            # kernel =  GPK.DotProduct() + GPK.WhiteKernel() 
+            # gp = GaussianProcessRegressor(kernel).fit(latent_X, Y)
+            # model = gp.predict
+            
+            
+            return lambda a: model(dim_red(a))
 
 
         problem.observe_with(observer)  # generates the data for cocopp post-processing
@@ -99,20 +116,25 @@ def main():
         # apply restarts while neither the problem is solved nor the budget is exhausted
         # mn= fmin(problem,x0)
         # global_opt = problem(mn)
-        evo.run_surrogate(
-            problem,
-            pop_size = 100, 
-            generations = 50, 
-            new_model_f = get_surrogate,
-            max_model_uses = 1, 
-            true_eval_every_n = 2
-        )
-
-        minimal_print(problem, final=problem.index == len(suite) - 1)
         
+        for pops,trues in [(5,240),(10,120),(20,60),(30,40),(40,30),(60,20)]:
+            for surrs in [[0],[1]]:
+                res = evo.run_surrogate(
+                    problem,
+                    pop_size = pops, 
+                    true_evals=trues, 
+                    surrogate_evals_per_true=surrs,
+                    new_model_f = get_surrogate,
+                    printing=False
+                )
+                res = round(res,2)
+                print(f'{pops}, {trues}, {surrs}, {res}')
+        break
+        minimal_print(problem, final=problem.index == len(suite) - 1)
     ### post-process data
     cocopp.main(observer.result_folder)  # re-run folders look like "...-001" etc
     #webbrowser.open("file://" + os.getcwd() + "/ppdata/index.html")
+
 
 if __name__ == '__main__':
     main()

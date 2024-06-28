@@ -77,3 +77,12 @@ def plot(train_x, train_y,x, f):
     plt.xticks(fontsize = 14)
     plt.yticks(fontsize = 14)
     plt.show()
+
+
+
+
+    
+
+if __name__ == '__main__':
+    import main
+    main.main()

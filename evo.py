@@ -7,7 +7,7 @@ import math
 import progress_bar
 from tqdm import tqdm
 
-def run_surrogate(problem, pop_size, true_evals, surrogate_evals_per_true, new_model_f, max_model_uses=1,warm_start_task = None,printing=True):
+def run_surrogate(problem, pop_size, true_evals, surrogate_evals_per_true, new_model_f,warm_start_task = None,printing=True):
     bounds = np.stack([problem.lower_bounds,problem.upper_bounds],axis=0).T
    
     if warm_start_task != None:
@@ -58,19 +58,26 @@ def run_surrogate(problem, pop_size, true_evals, surrogate_evals_per_true, new_m
             ys = np.array(ys)
             ys_t = ys
             # surrogate is generated at generation 1 and after every being used max_model_uses times; if only the true function is ever used, the model is never generated 
-            if surrogate_ever_needed:
+            
+            
+            true_evals_left -= 1
+            surrogate_uses_left += surrogate_evals_per_true[surr_eval_i]
+            surr_eval_i = (surr_eval_i + 1) % len(surrogate_evals_per_true)
+            if surrogate_uses_left > 0:
                 surrogate=new_model_f(true_xs,true_ys) 
         else :
             y = surrogate(np.array(pop))
             ys = tf.unstack(y,axis=0)
             ys_t = np.array([problem(x) for x in pop])
+            current_model_uses += 1
+            surrogate_uses_left -= 1
 
 
         best_in_gen =np.min(ys)
         best_gen_true = np.min(ys_t)
         best = min(best,best_in_gen)         
 
-        avg_err = 10 #np.average(np.abs(ys_t - ys))
+        avg_err = np.average(np.abs(ys_t - ys))
 
         if printing:
             print(f"{generation} ,,,, {round(best_gen_true, 2)}", f' ,,,, {round(best_in_gen, 2)} ,,,,, {round(avg_err, 2)}' if not use_true_f else '')
@@ -82,13 +89,8 @@ def run_surrogate(problem, pop_size, true_evals, surrogate_evals_per_true, new_m
 
 
         if use_true_f:
-            true_evals_left -= 1
             progress_bar.progress_bar(true_evals-true_evals_left,true_evals)
-            surrogate_uses_left += surrogate_evals_per_true[surr_eval_i]
-            surr_eval_i = (surr_eval_i + 1) % len(surrogate_evals_per_true)
-        else:
-            current_model_uses += 1
-            surrogate_uses_left -= 1
+            
 
             
     

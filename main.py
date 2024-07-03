@@ -31,7 +31,6 @@ from sklearn.decomposition import PCA
 import tensorflow_addons as tfa
 import sklearn.gaussian_process.kernels as GPK
 import progress_bar
-from scipy.linalg import pinv
 import math
 
 
@@ -49,13 +48,14 @@ def main():
     minimal_print = cocoex.utilities.MiniPrint()
 
     use_surrogate = False
+    training_points = 200
     for problem in suite:  # this loop will take several minutes or longer
         if problem.dimension <100: continue
         print(f'---------------------------------------------------dim: {problem.dimension}')
         
         
         d = problem.dimension
-        layers = [d/4]
+        layers = [d/2]
         
         inp = tf.keras.layers.Input(shape=d)
         feed = inp
@@ -67,8 +67,8 @@ def main():
         mlp.compile(optimizer=tfa.optimizers.AdamW(1e-4),loss = 'mse')
 
        
-        cvae = VAE.CVAE(d,layers)
-        cvae.compile(optimizer=tfa.optimizers.AdamW(1e-4))
+        vae = VAE.VAE(d,layers)
+        vae.compile(optimizer=tfa.optimizers.AdamW(1e-4))
         
         def get_surrogate(train_x, train_y):
             d = problem.dimension
@@ -76,13 +76,24 @@ def main():
             Y = np.array(train_y)
             dim_red = lambda a:a
 
+            
+            k = 1
+            n = len(Y)
+            weights = 1/(k*n + (np.arange(n)))
+            s = np.argsort(Y)
+            # chosen_i = np.random.choice(np.argsort(Y),size=len(Y),p=weights/np.sum(weights))
+            chosen_i = s[:int(len(Y))]
+            np.random.shuffle(chosen_i)
+            X = X[chosen_i,:]
+            Y = Y[chosen_i]
             # VAE
-            # cvae.fit(X,X,batch_size = 4,epochs=10,verbose=0)
-            # dim_red = cvae
+            # vae.fit(X,X,batch_size = int(Y.shape[0]/5),epochs=5,verbose=0)
+            # dim_red = vae
 
             # PCA
-            # pca = PCA(50).fit(X)
-            # dim_red = lambda a: pca.predict(a)
+            pca_dim = min(int(d/2),X.shape[0])
+            # pca = PCA(pca_dim).fit(X)
+            # dim_red = lambda a: pca.transform(a)
             # print(pca.explained_variance_ratio_.sum())
 
 
@@ -90,22 +101,27 @@ def main():
 
 
             # MLP            
-            # mlp.fit(latentX,Y,batch_size = 4,epochs=20,verbose=0)
+            # mlp.fit(latentX,Y,batch_size = int(Y.shape[0]/5),epochs=20,verbose=0)
             # model = mlp
 
 
             # ELM
-            input_weights = np.random.normal(size=[d,int(2*d)])
-            biases = np.random.normal(size=[int(2*d)])
-            h = lambda a: np.maximum(np.dot(a, input_weights) + biases,0)
-            output_weights = np.dot(pinv(h(latentX)), Y)
-            model = lambda a: np.dot(h(a), output_weights)
+            # inp_size = int(layers[-1])
+            # hidden_size = int(2*inp_size)
+            # input_weights = tf.random.normal([inp_size,hidden_size])
+            # biases = tf.random.normal([hidden_size])
+            # h = lambda a: tf.nn.relu(tf.tensordot(a,input_weights,1) + biases)
+            # output_weights = tf.tensordot(tf.linalg.pinv(h(tf.cast(latentX,tf.float32))), tf.cast(Y,tf.float32),1)
+            # inp = tf.keras.layers.Input(shape=inp_size)
+            # outp = tf.tensordot(h(inp),output_weights,1)
+            # model = tf.keras.Model(inputs=inp,outputs=outp)
  
 
             # GP
-            # kernel =  GPK.DotProduct() + GPK.WhiteKernel() 
-            # gp = GaussianProcessRegressor(kernel).fit(latent_X, Y)
-            # model = gp.predict
+            # kernel =  GPK.DotProduct() + GPK.WhiteKernel() + GPK.Matern(nu=5/2)
+            kernel =  GPK.Matern(nu=5/2)
+            gp = GaussianProcessRegressor(kernel,alpha=1e-3).fit(latentX, Y)
+            model = gp.predict
             
             
             return lambda a: model(dim_red(a))
@@ -117,8 +133,8 @@ def main():
         # mn= fmin(problem,x0)
         # global_opt = problem(mn)
         
-        for pops,trues in [(5,240),(10,120),(20,60),(30,40),(40,30),(60,20)]:
-            for surrs in [[0],[1]]:
+        for pops,trues in [(10,120),(20,60),(30,40),(40,30),(60,20),(5,240),]:
+            for surrs in [[0],[1],[0,2],[2]]:
                 res = evo.run_surrogate(
                     problem,
                     pop_size = pops, 

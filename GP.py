@@ -3,8 +3,24 @@ import matplotlib.pyplot as plt
 from sklearn.gaussian_process import GaussianProcessRegressor
 
 
-# from https://towardsdatascience.com/gaussian-process-models-7ebce1feb83d
+from functools import partial
+from sklearn.gaussian_process import GaussianProcessRegressor
+import scipy.optimize
+# https://stackoverflow.com/questions/62376164/how-to-change-max-iter-in-optimize-function-used-by-sklearn-gaussian-process-reg
+class MyGPR(GaussianProcessRegressor):
+    def __init__(self, max_iter, **kwargs):
+        super().__init__( **kwargs)
+        self.max_iter = max_iter
 
+    def _constrained_optimization(self, obj_func, initial_theta, bounds):
+        i = self.max_iter
+        
+        self.optimizer = new_optimizer
+        return super()._constrained_optimization(obj_func, initial_theta, bounds)
+
+
+# from https://towardsdatascience.com/gaussian-process-models-7ebce1feb83d
+ 
 
 
 def RBF_kernel(xn, xm, l = 1):

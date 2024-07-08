@@ -19,34 +19,30 @@ import VAE
 from rbf_layer import RBFLayer
 import scipy
 
-# global singletons so that some of the models can be iteratively trained and not reseted every time
-_vae = None
-_rbf_net = None
-def reset_globals():
-    _rbf_net = None
-    _vae = None
 
 #dimensionality reductions
-def id(x,y,w): 
+def id(x,y,w,model): 
     return lambda a:a
 
-def pca(d,x,y,w):
-    pca_dim = min(int(d),x.shape[0])
+def pca(d,x,y,w,model):
+    inp_dim = x.shape[-1]
+    d = int(d*inp_dim)
+    pca_dim = min(d,x.shape[0])
     pca = PCA(pca_dim).fit(x)
     return pca.transform
 
-def vae(l,x,y,w):
-    global _vae
+def vae(l,x,y,w,model):
     d = x.shape[-1]
-    if _vae == None:
-        _vae= VAE.VAE(d,l)
-    _vae.fit(x,x,batch_size = int(x.shape[0]/5),epochs=5,verbose=0)
-    return _vae
+    if model == None:
+        model= VAE.VAE(d,l)
+        model.compile()
+    model.fit(x,x,batch_size = int(x.shape[0]/5),epochs=5,verbose=0)
+    return model
 
 
 # predictors
 
-def gp(kernel,x,y,w):
+def gp(kernel,x,y,w,model):
     # 'custom' optimizer just to set a different maxiter
     def opt(obj_func,initial_theta,bounds): 
         res = scipy.optimize.minimize(
@@ -62,7 +58,7 @@ def gp(kernel,x,y,w):
     gp.fit(x, y)
     return gp.predict
     
-def elm(h,x,y,w):
+def elm(h,x,y,w,model):
     inp_size = x.shape[-1]
     hidden_size = int(h*inp_size)
     input_weights = tf.random.normal([inp_size,hidden_size])
@@ -74,10 +70,10 @@ def elm(h,x,y,w):
     model = tf.keras.Model(inputs=inp,outputs=outp)
     return model
 
-def rbf_network(layers,gamma,x,y,w): 
-    global _rbf_net
+def rbf_network(layers,gamma,x,y,w,model): 
     d = x.shape[-1]
-    if _rbf_net == None:
+    layers = [int (d*n) for n in layers]
+    if model == None or model.layers[0].input_shape[0][-1] != d:
         inp = tf.keras.layers.Input(shape=d)
         feed = inp
         for n in map(int,layers):
@@ -86,15 +82,16 @@ def rbf_network(layers,gamma,x,y,w):
             # feed = tf.keras.layers.Dropout(0.2)(feed)
         outp = tf.keras.layers.Dense(1)(feed)
         outp = tf.squeeze(outp,-1)
-        _rbf_net = tf.keras.Model(inputs=inp,outputs=outp)
-        _rbf_net.compile(optimizer=tfa.optimizers.AdamW(1e-4),loss = 'mse')
-    _rbf_net.fit(x,y,batch_size = int(x.shape[0]/10),epochs=5,verbose=0)
-    return _rbf_net
+        model = tf.keras.Model(inputs=inp,outputs=outp)
 
-def mlp(layers,x,y,w): 
-    global _rbf_net
+        model.compile(optimizer=tfa.optimizers.AdamW(1e-4),loss = 'mse')
+    model.fit(x,y,batch_size = int(x.shape[0]/10),epochs=5,verbose=0)
+    return model
+
+def mlp(layers,x,y,w,model):
     d = x.shape[-1]
-    if _rbf_net == None:
+    layers = [int (d*n) for n in layers]
+    if model == None or model.layers[0].input_shape[0][-1] != d:
         inp = tf.keras.layers.Input(shape=d)
         feed = inp
         for n in map(int,layers):
@@ -102,10 +99,10 @@ def mlp(layers,x,y,w):
             feed = tf.nn.relu(feed)
             # feed = tf.keras.layers.Dropout(0.2)(feed)
         outp = tf.keras.layers.Dense(1)(feed)
-        _rbf_net = tf.keras.Model(inputs=inp,outputs=outp)
-        _rbf_net.compile(optimizer=tfa.optimizers.AdamW(1e-4),loss = 'mse')
-    _rbf_net.fit(x,y,batch_size = int(x.shape[0]/10),epochs=5,verbose=0)
-    return _rbf_net
+        model = tf.keras.Model(inputs=inp,outputs=outp)
+        model.compile(optimizer=tfa.optimizers.AdamW(1e-4),loss = 'mse')
+    model.fit(x,y,batch_size = int(x.shape[0]/10),epochs=5,verbose=0)
+    return model
 
 
 

@@ -28,7 +28,7 @@ class Best_k:
 class Pure: 
     pass
 
-def get_surrogate(train_x, train_y,model_f,dim_red_f):
+def get_surrogate(train_x, train_y,model_f,dim_red_f,old_model,old_dim_red):
     X = np.array(train_x)
     Y = np.array(train_y) 
     
@@ -43,17 +43,12 @@ def get_surrogate(train_x, train_y,model_f,dim_red_f):
     # Y = Y[chosen_i]
     weights = None
   
-    dim_red = dim_red_f(X,Y,weights)
+    dim_red = dim_red_f(X,Y,weights,old_dim_red)
     latentX = dim_red(X)
-    model = model_f(latentX,Y,weights)
+    model = model_f(latentX,Y,weights,old_model)
     def run(xs):
-
-        
-
         ys = model(dim_red(xs))
-        sorted_i = tf.argsort(ys).numpy()
-        xs,ys = np.array(xs)[sorted_i], np.array(ys)[sorted_i]
-        return xs,ys
+        return ys#,model,dim_red
 
     def ansa(ms,comb, xs):
         ys = [m(xs) for m in ms]
@@ -62,7 +57,7 @@ def get_surrogate(train_x, train_y,model_f,dim_red_f):
 
 
 
-    return run
+    return run,dim_red, model
 
 
 
@@ -85,6 +80,7 @@ def run_surrogate(problem, pop_size, true_evals, surrogate_usage:Union[Alternate
     all_points = []
     true_xs= []
     true_ys= []
+    model,dim_red = None, None
     # mean_weights = []
     if isinstance(surrogate_usage,Best_k):
 
@@ -96,21 +92,24 @@ def run_surrogate(problem, pop_size, true_evals, surrogate_usage:Union[Alternate
         best = 9999999999
         true_evals_left = true_evals - eval_best_k
         generation = 0
-        for _ in range(int(eval_best_k)):
+        for _ in range(3):
+            for _ in range(int(eval_best_k)):
                 x = optimizer.ask()
                 y = problem(x)
                 true_xs.append(x)
                 true_ys.append(y)
-        optimizer.tell(list(zip(true_xs,true_ys)))
+            optimizer.tell(list(zip(true_xs[-eval_best_k:],true_ys[-eval_best_k:])))
         while true_evals_left > 0:
             if generation % retrain_rate == 0:
-                surrogate = get_surrogate(true_xs,true_ys,model_f,dim_red_f)
+                surrogate,dim_red,model = get_surrogate(true_xs,true_ys,model_f,dim_red_f,model,dim_red)
             xs = []
             for _ in range(int(pop_size*abs(surrogate_usage.generate_multiplier))):
                 x = optimizer.ask()
                 xs.append(x)
 
-            xs,ys = surrogate(np.array(xs)) 
+            ys = surrogate(np.array(xs)) 
+            sorted_i = tf.argsort(ys).numpy()
+            xs,ys = np.array(xs)[sorted_i], np.array(ys)[sorted_i]
             
             if False and len(pop) > pop_size: ## doesn't work
                 z = stats.zscore(ys)

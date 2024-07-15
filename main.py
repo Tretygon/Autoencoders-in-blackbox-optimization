@@ -20,23 +20,21 @@ import scipy.optimize  # to define the solver to be benchmarked
 from numpy.random import rand  # for randomised restarts
 import os, webbrowser  # to show post-processed results in the browser
 import sys
-import GP
-import VAE
 import evo
 from evo import Alternate_full_generations,Best_k,Pure
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
 import numpy as np
-import tensorflow as tf
+# import tensorflow as tf
 from sklearn.decomposition import PCA
-import tensorflow_addons as tfa
+# import tensorflow_addons as tfa
 import sklearn.gaussian_process.kernels as GPK
 import progress_bar
 import math
 from rbf_layer import RBFLayer
 from functools import partial as p
 from functools import partial
-import models
+# import models
 from joblib import Parallel, delayed
 from cocoex import default_observers
 import shutil 
@@ -49,13 +47,13 @@ suite1 = cocoex.Suite("bbob", "", "")
 def main():
     # shutil.rmtree("ppdata")
     # shutil.rmtree("exdata")
-    problem_num = 10
+    problem_num = 15
     dim = 10
-    budget = int(1000/dim)
+    budget = int(5000/dim)
     problem_info = f"function_indices:{problem_num} dimensions:{dim} instance_indices:1-15"
     configs = [ 
         # [5,Pure(),None,None,'pure5'],
-        [10,Pure(),None,None,'pure10'],
+        # [10,Pure(),None,None,'pure10'],
         [15,Pure(),None,None,'pure15'],
         # [20,Pure(),None,None,'pure20'],
         # [50,Best_k(10,1,1),p(models.vae,[1/2]),p(models.elm,200),'vae+elm200'],
@@ -77,17 +75,19 @@ def main():
     results = [single_config(config,budget,problem_info) for config in configs]
     fig, ax = plt.subplots()
     ax.set(xlabel='log evals', ylabel='func value',
-    title=f'{func_names[problem_num-1]}\n{problem_info} function',xscale = 'linear',yscale='linear')
+    title=f'{func_names[problem_num-1]}\n{problem_info}',xscale = 'linear',yscale='linear')
         
     
     fun_mins = []
     for config,config_res in zip(configs,results):
         config_desc = config[-1]
-        evals, vals = list(map(np.array,zip(*config_res)))
+        evals, vals_ = list(map(np.array,zip(*config_res)))
         
-        med = np.median(vals,0)
-        ax.plot(evals[0], med,label=config_desc)
-        fun_mins.append(med[-1])
+        for i,med in enumerate(vals_):
+            # med = np.median(vals,0)
+            ax.plot(evals[i], med,label=config_desc)
+            fun_mins.append(med[-1])
+            # print([a[-1] for a in med])
     order = np.argsort(fun_mins)
     handles, labels = plt.gca().get_legend_handles_labels()
     ax.legend([handles[idx] for idx in order],[labels[idx]+'-->'+str(round(fun_mins[idx],2)) for idx in order])
@@ -123,14 +123,14 @@ def single_config(config,budget,problem_info):
 
 def run_problem(observer,pops,surrs,dim_red,model, desc,trues,printer,problem):
     global suite1
-    problem_num,dim,ins = problem.id_triple
-    problem1 = suite1.get_problem_by_function_dimension_instance(problem_num, dim, 1)
+    problem_num,dim = problem.id_function, problem.dimension
+    # problem1 = suite1.get_problem_by_function_dimension_instance(problem_num, dim, 1)
     observer.observe(problem)
     print(f'---------------------------------------------------f: {problem_num}  dim: {dim}')
     
     bests = evo.run_surrogate(
                 problem,
-                problem1,
+                problem,
                 pop_size = pops, 
                 true_evals=int(trues*dim), 
                 surrogate_usage=surrs,

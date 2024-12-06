@@ -21,22 +21,22 @@ import scipy
 
 
 #dimensionality reductions
-def id(x,y,w,model): 
+def id(x,w,model): 
     return lambda a:a
 
-def pca(d,x,y,w,model):
+def pca(bottleneck,x,w,model):
     inp_dim = x.shape[-1]
-    d = int(d*inp_dim)
-    pca_dim = min(d,x.shape[0])
+    pca_dim = int(bottleneck*inp_dim) if isinstance(bottleneck,float) else bottleneck
+    pca_dim = min(pca_dim,x.shape[0])
     pca = PCA(pca_dim).fit(x)
     return pca.transform
 
-def vae(l,x,y,w,model):
+def vae(l,x,w,model):
     d = x.shape[-1]
     if model == None:
         model= VAE.VAE(d,l)
         model.compile()
-    model.fit(x,x,batch_size = int(x.shape[0]/5),epochs=5,verbose=0)
+    model.fit(x,x,batch_size = int(x.shape[0]/20),epochs=3,verbose=0)
     return model
 
 
@@ -63,7 +63,8 @@ def elm(h,x,y,w,model):
     hidden_size = int(h*inp_size)
     input_weights = tf.random.normal([inp_size,hidden_size])
     biases = tf.random.normal([hidden_size])
-    h = lambda a: tf.nn.silu(tf.tensordot(a,input_weights,1) + biases)
+    # h = lambda a: tf.nn.silu(tf.tensordot(a,input_weights,1) + biases)
+    h = lambda a: tf.nn.relu(tf.tensordot(a,input_weights,1) + biases)
     output_weights = tf.tensordot(tf.linalg.pinv(h(tf.cast(x,tf.float32))), tf.cast(y,tf.float32),1)
     inp = tf.keras.layers.Input(shape=inp_size)
     outp = tf.tensordot(h(inp),output_weights,1)
@@ -85,7 +86,7 @@ def rbf_network(layers,gamma,x,y,w,model):
         model = tf.keras.Model(inputs=inp,outputs=outp)
 
         model.compile(optimizer=tfa.optimizers.AdamW(1e-4),loss = 'mse')
-    model.fit(x,y,batch_size = int(x.shape[0]/10),epochs=5,verbose=0)
+    model.fit(x,y,batch_size = int(x.shape[0]/20),epochs=3,verbose=0)
     return model
 
 def mlp(layers,x,y,w,model):

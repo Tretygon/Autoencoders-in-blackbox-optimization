@@ -21,7 +21,7 @@ import scipy
 
 
 #dimensionality reductions
-def id(x,w,model): 
+def id(x,y=None,w=None,model=None): 
     return lambda a:a
 
 def pca(bottleneck,x,w,model):
@@ -63,8 +63,8 @@ def elm(h,x,y,w,model):
     hidden_size = int(h*inp_size)
     input_weights = tf.random.normal([inp_size,hidden_size])
     biases = tf.random.normal([hidden_size])
-    # h = lambda a: tf.nn.silu(tf.tensordot(a,input_weights,1) + biases)
-    h = lambda a: tf.nn.relu(tf.tensordot(a,input_weights,1) + biases)
+    h = lambda a: tf.nn.silu(tf.tensordot(a,input_weights,1) + biases)
+    # h = lambda a: tf.nn.relu(tf.tensordot(a,input_weights,1) + biases)
     output_weights = tf.tensordot(tf.linalg.pinv(h(tf.cast(x,tf.float32))), tf.cast(y,tf.float32),1)
     inp = tf.keras.layers.Input(shape=inp_size)
     outp = tf.tensordot(h(inp),output_weights,1)

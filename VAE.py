@@ -26,10 +26,9 @@ class VAE(tf.keras.Model):
         feed = tf.keras.layers.Dense(self.latent_dim*2, kernel_regularizer=reg)(feed)
         self.encoder = tf.keras.Model(inputs=en_inp,outputs=feed)
         
-        de_inp =  input=tf.keras.layers.Input(shape=(self.latent_dim,))
+        de_inp =tf.keras.layers.Input(shape=(self.latent_dim,))
         feed = de_inp
-        for n in layer_sizes[:-1:-1]:
-            print(int(feed.shape[-1] == n))
+        for n in layer_sizes[:-1][::-1]:
             feed = tf.keras.layers.Dense(n, activation=activation, kernel_regularizer=reg)(feed) + (int(feed.shape[-1] == n) * feed if feed.shape[-1] == n else 0)
         feed = tf.keras.layers.Dense(inp_size, kernel_regularizer=reg)(feed)
         self.decoder = tf.keras.Model(inputs=de_inp,outputs=feed)

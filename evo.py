@@ -36,8 +36,9 @@ class Pure:
         return 'Pure'    
 
 def get_surrogate(train_x, train_y,model_f,dim_red_f,old_model,old_dim_red,basis):
+    if dim_red_f == None: dim_red_f = lambda b,c,d: lambda a: a
+    if model_f == None: model_f = lambda b,c,d,e: lambda a: a
     X = np.array(train_x)
-    
     Y = np.array(train_y) 
 
     # X = X.dot(np.linalg.inv(basis).T)
@@ -62,7 +63,7 @@ def get_surrogate(train_x, train_y,model_f,dim_red_f,old_model,old_dim_red,basis
     # Y = Y[chosen_i]
     weights = None
   
-    dim_red = dim_red_f(xx,weights,old_dim_red)
+    dim_red = dim_red_f(X,weights,old_dim_red)
     latentX = dim_red(xx)
     model = model_f(latentX,yy,weights,old_model)
     def run(xs):

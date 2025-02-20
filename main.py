@@ -48,40 +48,61 @@ import models
 import plotting
 matplotlib.use('TkAgg')
 os.environ['KERAS_BACKEND'] = 'tensorflow'
-
+arr2str = lambda arr: ' '.join(str(x) for x in arr)
+str2arr = lambda dtype: lambda string: np.fromstring(string, dtype=dtype, sep=' ')
+def str2evomode(s):
+        if s.startswith("Pure"): return Pure()
+        elif s.startswith("BestK"):
+            s1 = s[len("BestK"):]
+            return Best_k(float(s1) if '.' in s1 else int(s1), 1, 1) 
+        else: raise Exception
 unzip = lambda a:list(map(list,list(zip(*a))))
-pd_cols = ['vals', 'evals', 'pop_size', 'evo_mode', 'model', 'dim_red', 'instance','function', 'dim', 'full_desc', 'elapsed_time', 'coco_directory', 'timestamp', 'true_eval_budget'] # and 'ranks', '
+pd_cols = ['vals', 'evals', 'pop_size', 'evo_mode', 'model', 'dim_red', 'instance','function', 'dim', 'full_desc', 'elapsed_time', 'coco_directory', 'timestamp', 'true_eval_budget','train_num', 'sort_train','scale_train'] # and 'ranks', '
 func_names = ['Sphere','Ellipsoidal','Rastrigin','B ̈uche-Rastrigin','Linear Slope','Attractive Sector','Step Ellipsoidal','Rosenbrock','Rosenbrock rotated','Ellipsoidal','Discus','Bent Cigar','Sharp Ridge','Different Powers','Rastrigin','Weierstrass','Schaffers F7','Schaffers F7 moderately ill-conditioned','Composite Griewank-Rosenbrock F8F2','Schwefel','Gallagher’s Gaussian 101-me Peaks','Gallagher’s Gaussian 21-hi Peaks','Katsuura','Lunacek bi-Rastrigin']
 
-def main():
-    df = run()
-    plot()
+def main(df=None):
+    if df is None:
+        df = load_data()
+    df = run(df)
+    plot(df)
+
 def plot(df=None):
-    if df==None:
+    if df is None:
         df = load_data()
     plotting.plot_ranks(df)
 
-def append(df):
-    df['vals'] = df['vals'].map(np.array2string)
-    df['evals'] = df['evals'].map(np.array2string)
+def datastore_store(df):
+    df = df.copy()
+    df['vals'] = df['vals'].map(arr2str)
+    df['evals'] = df['evals'].map(arr2str)
     df['evo_mode'] = df['evo_mode'].map(str)
-    print(df.dtypes)
-    print(df)
     df.to_hdf('data.h5','df', mode='a')
     
+
+
 def load_data(name='df'):
-    data_storage = pd.HDFStore('data.h5','r')
-    df = data_storage[name] if name in data_storage.keys() else None
-    return df
+    try:
+        with pd.HDFStore('data.h5','r') as data_storage:
+            df = data_storage[name]
+            df['vals'] = df['vals'].map(str2arr(float))
+            df['evals'] = df['evals'].map(str2arr(int))
+            df['evo_mode'] = df['evo_mode'].map(str2evomode)
+            return df
+    except FileNotFoundError:
+                return None
+    
 
 def save_data(df, name='df'):
     raise BaseException()
     data_storage = pd.HDFStore('data.h5','w')
     data_storage['df'] = df
 
-def run():
+
+
+
+def run(df=None):
     budget = int(3*10e1)
-    problem_info = f"function_indices:1-24 dimensions:10 instance_indices:1-5"
+    problem_info = f"function_indices:1-24 dimensions:10 instance_indices:1-3"
 
     pure = Pure()
     best_k = lambda a: Best_k(a,1,1)
@@ -93,45 +114,86 @@ def run():
     rbf = lambda layers,gamma: (p(models.rbf_network,layers,gamma), f'elm{layers} {gamma}')
     gp = p(models.gp,GPK.Matern(nu=5/2)) , 'gp'
 
-    configs = [ 
-        ## pop_size, evolution_eval_mode, dim_reduction, model
-        # [5,Pure(),None,None,'pure5'],
-        # [10,Pure(),None,None,'pure10'],
-        # [15,Pure(),None,None,'pure15'],
-        [8,pure,None,None],
-        [16,pure,None,None],
-        [32,pure,None,None],
-        
-        [8,best_k(1.0/2),None,gp],
-        [8,best_k(1.0/2),pca(1/2),gp],
-        [8,best_k(1.0/2),vae([3/4,1/2]),gp],
 
-        [16*1,best_k(1.0/2),None,gp],
-        [16*1,best_k(1.0/2),pca(1/2),gp],
-        [16*1,best_k(1.0/2),vae([3/4,1/2]),gp],
+
+    ansamble = lambda models,combination_f: lambda data: combination_f(np.stack([m(data) for m in models],0), axis=0)
+
+    configs = [ 
+        ## pop_size, evolution_eval_mode, dim_reduction, model, train_num, sort_train, scale_train
+        [8,pure,None,None, -1, False, False],
+        [16,pure,None,None, -1, False, False],
+        [32,pure,None,None, -1, False, False],
+        
+        [8,best_k(1.0/2),None,gp, 200, False, False],
+        [8,best_k(1.0/2),pca(1/2),gp, 200, False, False],
+        [8,best_k(1.0/2),vae([3/4,1/2]),gp, 200, False, False],
+
+        [16*1,best_k(1.0/2),None,gp, 200, False, False],
+        [16*1,best_k(1.0/2),pca(1/2),gp, 200, False, False],
+        [16*1,best_k(1.0/2),vae([3/4,1/2]),gp, 200, False, False],
         
         
-        [16*2,best_k(1.0/2),None,gp],
-        [16*2,best_k(1.0/2),pca(1/2),gp],
-        [16*2,best_k(1.0/2),vae([3/4,1/2]),gp],
-        # [16,best_k(1.0/2),None,elm(200)],
-        # [16,best_k(1.0/2),pca(1/2),elm(200)],
-        # [16,best_k(1.0/2),vae(1/2),elm(200)],
-        # [32,pure,None,None],
-        # [16*2,best_k(1.0/2),vae(1/2),gp],
-        # [16*22,best_k(1.0/2),pca(1/2),gp],
-        # [16*2,best_k(1.0/2),id,rbf([1/2], 5/2)],
+        [16*2,best_k(1.0/2),None,gp, 200, False, False],
+        [16*2,best_k(1.0/2),pca(1/2),gp, 200, False, False],
+        [16*2,best_k(1.0/2),vae([3/4,1/2]),gp, 200, False, False],
+
+        [16*3,best_k(1.0/2),None,gp, 200, False, False],
+        [16*3,best_k(1.0/2),pca(1/2),gp, 200, False, False],
+        [16*3,best_k(1.0/2),vae([3/4,1/2]),gp, 200, False, False],
+        
+        [8,best_k(1.0/4),None,gp, 200, False, False],
+        [8,best_k(1.0/4),pca(1/2),gp, 200, False, False],
+        [8,best_k(1.0/4),vae([3/4,1/2]),gp, 200, False, False],
+
+        [16*1,best_k(1.0/4),None,gp, 200, False, False],
+        [16*1,best_k(1.0/4),pca(1/2),gp, 200, False, False],
+        [16*1,best_k(1.0/4),vae([3/4,1/2]),gp, 200, False, False],
+        
+        
+        [16*2,best_k(1.0/4),None,gp, 200, False, False],
+        [16*2,best_k(1.0/4),pca(1/2),gp, 200, False, False],
+        [16*2,best_k(1.0/4),vae([3/4,1/2]),gp, 200, False, False],
+
+        [16*3,best_k(1.0/4),None,gp, 200, False, False],
+        [16*3,best_k(1.0/4),pca(1/2),gp, 200, False, False],
+        [16*3,best_k(1.0/4),vae([3/4,1/2]),gp, 200, False, False],
+        
+        [8,best_k(1.0/8),None,gp, 200, False, False],
+        [8,best_k(1.0/8),pca(1/2),gp, 200, False, False],
+        [8,best_k(1.0/8),vae([3/4,1/2]),gp, 200, False, False],
+
+        [16*1,best_k(1.0/8),None,gp, 200, False, False],
+        [16*1,best_k(1.0/8),pca(1/2),gp, 200, False, False],
+        [16*1,best_k(1.0/8),vae([3/4,1/2]),gp, 200, False, False],
+        
+        [16*2,best_k(1.0/8),None,gp, 200, False, False],
+        [16*2,best_k(1.0/8),pca(1/2),gp, 200, False, False],
+        [16*2,best_k(1.0/8),vae([3/4,1/2]),gp, 200, False, False],
+
+        [16*3,best_k(1.0/8),None,gp, 200, False, False],
+        [16*3,best_k(1.0/8),pca(1/2),gp, 200, False, False],
+        [16*3,best_k(1.0/8),vae([3/4,1/2]),gp, 200, False, False],
+        
+        [16*4,best_k(1.0/8),None,gp, 200, False, False],
+        [16*4,best_k(1.0/8),pca(1/2),gp, 200, False, False],
+        [16*4,best_k(1.0/8),vae([3/4,1/2]),gp, 200, False, False],
+
+        
     ]
-    df_slices = [single_config(config,budget,problem_info) for config in configs]
-    df = pd(df_slices).reset_index(drop=True)
+    for config in configs:
+        res = single_config(config,budget,problem_info, df=df) 
+        df = pd.concat([df, res], ignore_index=True)
+        datastore_store(df)
+
     return df
     
 
 
 
-def single_config(config,budget,problem_info):
+def single_config(config,budget,problem_info, df=None):
     global pd_cols
-    pop_size,evo_mode,dim_red,model = config
+    pop_size,evo_mode,dim_red,model,train_num, sort_train,scale_train = config
+    pop_size = int(pop_size)
     (dim_red_f, dim_red_name) = dim_red if dim_red else (None, '')
     (model_f, model_name) = model if model else (None, '')
     full_desc = f'{pop_size}_{evo_mode}'+ ('_' if len(dim_red_name)>0 else '') + f'{dim_red_name}' + ('_' if len(model_name)>0 else '') + f'{model_name}'
@@ -145,57 +207,67 @@ def single_config(config,budget,problem_info):
     minimal_print = cocoex.utilities.MiniPrint()
     observer = cocoex.Observer("bbob", opts)
 
-    def hehea(problem):
+    def run_problem(problem):
         fun, dim, ins = problem.id_triple
+
+        # check whether those settings were already run and are stored in the dataframe
+        if df is not None:
+            names = ['pop_size', 'evo_mode', 'model', 'dim_red', 'instance','function', 'dim',  'true_eval_budget', 'train_num', 'sort_train','scale_train']
+            vals = [pop_size, evo_mode,model_name,dim_red_name, ins, fun, dim, budget, train_num, sort_train, scale_train]
+            masks = np.array([(df[n] == v).to_numpy() for n,v in zip(names,vals)]).T
+            is_run_duplicate = np.logical_and.reduce(masks,axis=1)
+            is_run_duplicate = np.any(is_run_duplicate)
+            if is_run_duplicate:
+                return None
+
+        observer.observe(problem)
+        
         start_time = timer()
-        res = p(run_problem,observer,pop_size,evo_mode,dim_red_f,model_f, full_desc,budget,minimal_print)(problem) 
+        evals, vals = evo.run_surrogate(
+            problem,
+            problem,
+            pop_size = pop_size, 
+            true_evals=int(budget), 
+            surrogate_usage=evo_mode,
+            dim_red_f = dim_red_f,
+            model_f = model_f,
+            printing=True, 
+            seed= 42,
+            train_num = train_num, 
+            sort_train = sort_train, 
+            scale_train= scale_train
+        )
         end_time = timer()
+
+        info = f'{pop_size}, {budget}, {evo_mode}, {full_desc}, {round(np.min(vals),2)}'
+        problem.free()
         elapsed = end_time - start_time
-        vals,evals = res
         timestamp = datetime.now().strftime("%m_%d___%H_%M_%S")
-        df_row = [evals, vals, pop_size,evo_mode,model_name,dim_red_name, ins, fun, dim, full_desc, elapsed, observer.result_folder, timestamp, budget]
+        df_row = [vals, evals, pop_size,evo_mode,model_name,dim_red_name, ins, fun, dim, full_desc, elapsed, observer.result_folder, timestamp, budget, train_num, sort_train,scale_train]
         return df_row
 
     # results = Parallel(n_jobs=8, prefer="threads")(delayed(p(run_problem,observer,pops,surrs,dim_red,model, desc,trues,minimal_print))(problem) for problem in suite)
     results = []
     for problem in suite:
-        res = hehea(problem)
-        results.append(res)
+        res = run_problem(problem)
+        if res != None:
+            results.append(res)
 
 
     # list(zip(*l))
     # for problem in suite:  # this loop will take several minutes or longer
     #     run_problem(problem,observer)
     print(f"....................................................................run complete {config}")
-    unzipped = unzip(results)
-    df = pd.DataFrame({k:v for (k,v) in zip (pd_cols,unzipped)})
-    append(df)
-    return df,observer.result_folder
+   
+    df = pd.DataFrame({k:v for (k,v) in zip (pd_cols,unzip(results))}) # converts list of dataframe slices to dataframe
+    return df
 
-def run_problem(observer,pops,surrs,dim_red,model, desc,budget,printer,problem):
-    global suite1
-    problem_num,dim,instance = problem.id_function, problem.dimension,problem.id_instance
-    # problem1 = suite1.get_problem_by_function_dimension_instance(problem_num, dim, 1)
-    observer.observe(problem)
-    print(f'---------------------------------------------------f: {problem_num}  dim: {dim}')
-    
-    bests = evo.run_surrogate(
-                problem,
-                problem,
-                pop_size = pops, 
-                true_evals=int(budget), 
-                surrogate_usage=surrs,
-                dim_red_f = dim_red,
-                model_f = model,
-                printing=True
-            )
-    evals, vals = bests
-    res = f'{pops}, {budget}, {surrs}, {desc}, {round(np.min(vals),2)}'
-    print(res)
-    problem.free()
-    return evals, vals
-    # printer(problem, final=problem_f=='f24')
 
 
 if __name__ == '__main__':
-    main()
+    df = load_data()
+    # df = run(df)
+    df = run(df)
+    plot(df)
+    # datastore_store(load_data(),'w')
+    

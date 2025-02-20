@@ -35,22 +35,33 @@ class Pure:
     def __str__(self):
         return 'Pure'    
 
-def get_surrogate(train_x, train_y,model_f,dim_red_f,old_model,old_dim_red,basis):
+
+
+def get_surrogate(train_x, train_y,model_f,dim_red_f,old_model,old_dim_red,seed,num_reconds_for_model_training = 200, sort_training_data = False, scale_training= False):
     if dim_red_f == None: dim_red_f = lambda b,c,d: lambda a: a
     if model_f == None: model_f = lambda b,c,d,e: lambda a: a
     X = np.array(train_x)
     Y = np.array(train_y) 
 
-    # X = X.dot(np.linalg.inv(basis).T)
-    # X = np.linalg.solve(basis, X).dot(X)
 
-    # scaler = StandardScaler()
-    # Y = scaler.fit_transform(np.expand_dims(Y, -1))
-    # Y = np.squeeze(Y,-1)
-    # sorted_i = np.argsort(Y)
-    records_to_train_on = 200
-    strt = -records_to_train_on if records_to_train_on < X.shape[0] else 0
-    xx,yy = X[strt:], Y[strt:]
+    
+    xx,yy = X, Y
+    if scale_training:
+        scaler = StandardScaler()
+        yy = scaler.fit_transform(np.expand_dims(yy, -1))
+        yy = np.squeeze(yy,-1)
+    if sort_training_data: 
+        sorted = np.argsort(yy)
+        xx, yy = xx[sorted][::-1], yy[sorted][::-1]
+    if num_reconds_for_model_training != None:
+        strt = -num_reconds_for_model_training if num_reconds_for_model_training < X.shape[0] else 0
+        xx,yy = xx[strt:], yy[strt:]
+    if sort_training_data and num_reconds_for_model_training != None:  # shuffle the sorted data after the bad ones have been cut
+        rng = np.random.default_rng(seed=seed)
+        indexes = range(len(yy))
+        rng.shuffle(indexes)
+        xx, yy = xx[indexes], yy[indexes]
+
     
     # k = 1
     # n = len(Y)
@@ -68,15 +79,13 @@ def get_surrogate(train_x, train_y,model_f,dim_red_f,old_model,old_dim_red,basis
     model = model_f(latentX,yy,weights,old_model)
     def run(xs):
         ys = model(dim_red(xs))
-        # ys = scaler.inverse_transform(np.expand_dims(ys, -1))
-        # ys = np.squeeze(ys,-1)
+        if scale_training:
+            ys = scaler.inverse_transform(np.expand_dims(ys, -1))
+            ys = np.squeeze(ys,-1)
 
-        return ys#,model,dim_red
-
-    def ansa(ms,comb, xs):
-        ys = [m(xs) for m in ms]
-        ys = np.stack(ys,0)
-        ys = np.min(ys,0)
+        return ys
+    
+    
 
 
 
@@ -84,7 +93,7 @@ def get_surrogate(train_x, train_y,model_f,dim_red_f,old_model,old_dim_red,basis
 
 
 
-def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[Alternate_full_generations, Best_k, Pure],dim_red_f, model_f,printing=True):
+def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[Alternate_full_generations, Best_k, Pure],dim_red_f, model_f, train_num, sort_train,scale_train,printing=True,seed = 42):
     bounds = np.stack([problem.lower_bounds,problem.upper_bounds],axis=0).T
    
     # if warm_start_task != None:
@@ -101,7 +110,7 @@ def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[
         nonlocal optimizer_popsize
         # initial = np.random.rand(problem.dimension)*9 - 4.5
         initial = np.zeros(problem.dimension)
-        return CMA(mean=initial, sigma=1.0,bounds=bounds,population_size=optimizer_popsize)   # should there be popsize or K???
+        return CMA(mean=initial, sigma=1.0, seed=seed,bounds=bounds,population_size=optimizer_popsize)   # should there be popsize or K???
     optimizer = new_optim()
     current_model_uses = 0
     evals_wihout_change = 0
@@ -181,7 +190,7 @@ def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[
             ys = eval_true(xs)
             # if optimizer.population_size == surrogate_usage.k:
             optimizer.tell(list(zip(xs,ys))) 
-        surrogate,dim_red,model = get_surrogate(true_xs,true_ys,model_f,dim_red_f,model,dim_red, optimizer._sigma**2 * optimizer._C)
+        surrogate,dim_red,model = get_surrogate(true_xs,true_ys,model_f,dim_red_f,model,dim_red, train_num, sort_train,scale_train)
         while true_evals_left > 0:
             xs = np.array([optimizer.ask() for _ in range(int(pop_size*abs(surrogate_usage.generate_multiplier)))])
             ys = surrogate(xs) 
@@ -204,7 +213,7 @@ def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[
             k = min(true_evals_left,eval_best_k)
             top_k_xs = xs[:k]  
             top_k_ys = eval_true(top_k_xs)
-            surrogate,dim_red,model = get_surrogate(true_xs,true_ys,model_f,dim_red_f,model,dim_red,optimizer._sigma**2 * optimizer._C)
+            surrogate,dim_red,model = get_surrogate(true_xs,true_ys,model_f,dim_red_f,model,dim_red,train_num, sort_train,scale_train)
 
             if true_evals_left == 0:
                 pass # the training is at the end, no need to tell the optimizer anything anymore 

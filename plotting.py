@@ -6,8 +6,8 @@ from timeit import default_timer as timer
 import pandas as pd
 import math
 import datetime
-
-chunkyfy = lambda arr,size: np.array_split(arr, math.ceil(len(arr)/size))
+datetime
+chunkyfy = lambda arr,window_size: np.array_split(arr, math.ceil(len(arr)/window_size))
 
 def plot_ranks(df,window_size = 5):
     def compute_ranks(df):
@@ -17,17 +17,20 @@ def plot_ranks(df,window_size = 5):
             b = np.apply_along_axis(lambda a: a.argsort().argsort()+1,0,a) # rank within each column 
             return list(b)
         df['ranks'] = df.groupby(['function', 'instance', 'dim'])['normalised_len_vals'].transform(to_ranks)
-        df = df.drop(['normalised_len_vals'])
+        df = df.drop(['normalised_len_vals'], axis=1)
         return df, common_eval 
     df,common_eval = compute_ranks(df)
     avg_rank_series = df.groupby(['full_desc'])['ranks'].apply(lambda a:np.average(a.to_list(),axis=0))
     avg_rank = avg_rank_series.apply(np.average)
 
     fig, ax = plt.subplots()
+    title_stringer = lambda name, mn, mx: name + ' ' + str(mn) + (('-'+str(mx)) if mn != mx else '')
+    title = title_stringer('fun',  df['function'].min(), df['function'].max()) + title_stringer(', dim', df['dim'].min(),df['dim'].max()) + title_stringer(', inst', df['instance'].min(),df['instance'].max())
+    
     ax.set(
         xlabel='evals', 
         ylabel='average rank',
-        title='fun '+ df['function'].min()+'-'+df['function'].max()+', dim '+ df['dim'].min()+'-'+df['dim'].max()+', instance ' + df['instance'].min()+'-'+df['instance'].max(),
+        title=title,
         xscale = 'linear',
         yscale='linear'
     )
@@ -45,7 +48,7 @@ def plot_ranks(df,window_size = 5):
     handles, labels = plt.gca().get_legend_handles_labels()
     ax.legend([handles[idx] for idx in order],[labels[idx]+'-->'+str(round(avg_rank[idx],2)) for idx in order])
     ax.grid()
-    n = datetime.now().strftime("%m_%d___%H_%M_%S")
+    n = datetime.datetime.now().strftime("%m_%d___%H_%M_%S")
     fig.savefig(f"graphs/{n}.png")
     plt.show()
     

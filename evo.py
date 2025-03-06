@@ -78,11 +78,16 @@ def get_surrogate(train_x, train_y,model_f,dim_red_f,old_model,old_dim_red,seed,
     latentX = dim_red(xx)
     model = model_f(latentX,yy,weights,old_model)
     def run(xs):
-        ys = model(dim_red(xs))
+        latent = dim_red(xs)
+        ys = model(latent)
         if scale_training:
             ys = scaler.inverse_transform(np.expand_dims(ys, -1))
             ys = np.squeeze(ys,-1)
 
+
+        for d in [xs, ys, latent]: 
+            if np.any(np.isnan(d)):
+                print()
         return ys
     
     
@@ -95,7 +100,12 @@ def get_surrogate(train_x, train_y,model_f,dim_red_f,old_model,old_dim_red,seed,
 
 def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[Alternate_full_generations, Best_k, Pure],dim_red_f, model_f, train_num, sort_train,scale_train,printing=True,seed = 42):
     bounds = np.stack([problem.lower_bounds,problem.upper_bounds],axis=0).T
-   
+    optimizer_popsize = pop_size
+    def new_optim():
+        nonlocal optimizer_popsize,bounds
+        # initial = np.random.rand(problem.dimension)*9 - 4.5
+        initial = np.zeros(problem.dimension)
+        return CMA(mean=initial, sigma=1.0, seed=seed,bounds=bounds,population_size=optimizer_popsize)
     # if warm_start_task != None:
     #     source_solutions = []
     #     for _ in range(1000):
@@ -105,16 +115,10 @@ def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[
     #     # ws_mean, ws_sigma, ws_cov = get_warm_start_mgd(true_points, gamma=0.5, alpha=0.1)
     #     # optimizer = CMA(mean=ws_mean, sigma=ws_sigma,cov=ws_cov,bounds=bounds,population_size=pop_size)
     # else:
-    optimizer_popsize = pop_size
-    def new_optim():
-        nonlocal optimizer_popsize
-        # initial = np.random.rand(problem.dimension)*9 - 4.5
-        initial = np.zeros(problem.dimension)
-        return CMA(mean=initial, sigma=1.0, seed=seed,bounds=bounds,population_size=optimizer_popsize)   # should there be popsize or K???
+       # should there be popsize or K???
     optimizer = new_optim()
     current_model_uses = 0
     evals_wihout_change = 0
-    all_points = []
     true_xs= []
     true_ys= []
     model,dim_red = None, None

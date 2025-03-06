@@ -77,7 +77,7 @@ def rbf_network(layers,gamma,x,y,w,model):
     if model == None or model.layers[0].input_shape[0][-1] != d:
         inp = tf.keras.layers.Input(shape=d)
         feed = inp
-        for n in map(int,layers):
+        for n in layers:
             feed = RBFLayer(n)(feed)# + (int(feed.shape[-1] == n) * feed if feed.shape[-1] == n else 0)
             # feed = tf.nn.relu(feed)
             # feed = tf.keras.layers.Dropout(0.2)(feed)

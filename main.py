@@ -24,8 +24,8 @@ import evo
 from evo import Alternate_full_generations,Best_k,Pure
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
-import numpy as np
 from timeit import default_timer as timer
+import numpy as np
 import pandas as pd
 # import tensorflow as tf
 from sklearn.decomposition import PCA
@@ -45,59 +45,42 @@ import matplotlib.pyplot as plt
 import tkinter 
 import matplotlib
 import models
+import itertools
 import plotting
+import storage
 matplotlib.use('TkAgg')
 os.environ['KERAS_BACKEND'] = 'tensorflow'
-arr2str = lambda arr: ' '.join(str(x) for x in arr)
-str2arr = lambda dtype: lambda string: np.fromstring(string, dtype=dtype, sep=' ')
-def str2evomode(s):
-        if s.startswith("Pure"): return Pure()
-        elif s.startswith("BestK"):
-            s1 = s[len("BestK"):]
-            return Best_k(float(s1) if '.' in s1 else int(s1), 1, 1) 
-        else: raise Exception
+
+listmap = lambda func, collection: list(map(func, collection))
+
 unzip = lambda a:list(map(list,list(zip(*a))))
 pd_cols = ['vals', 'evals', 'pop_size', 'evo_mode', 'model', 'dim_red', 'instance','function', 'dim', 'full_desc', 'elapsed_time', 'coco_directory', 'timestamp', 'true_eval_budget','train_num', 'sort_train','scale_train'] # and 'ranks', '
 func_names = ['Sphere','Ellipsoidal','Rastrigin','B ̈uche-Rastrigin','Linear Slope','Attractive Sector','Step Ellipsoidal','Rosenbrock','Rosenbrock rotated','Ellipsoidal','Discus','Bent Cigar','Sharp Ridge','Different Powers','Rastrigin','Weierstrass','Schaffers F7','Schaffers F7 moderately ill-conditioned','Composite Griewank-Rosenbrock F8F2','Schwefel','Gallagher’s Gaussian 101-me Peaks','Gallagher’s Gaussian 21-hi Peaks','Katsuura','Lunacek bi-Rastrigin']
 
+def get_full_desc1(item):
+    nonempty_append = lambda name: ('_'+item[name] if len(item[name])>0 else '')
+    names = ['model_name', 'dim_red_name','train_num', 'sort_train','scale_train']
+    strs = map(nonempty_append,names)
+    full_desc = item['pop_size'] + '_' + item['evo_mode'] +  (''.join(strs))
+    return full_desc
+
+def get_full_desc2(pop_size,evo_mode,model_name, dim_red_name,train_num, sort_train,scale_train):
+    nonempty_append = lambda val: (f'_{val}' if len(val)>0 else '')
+    vals = [model_name, dim_red_name,train_num, sort_train,scale_train]
+    strs = map(nonempty_append,vals)
+    full_desc = f'{pop_size}_{evo_mode}'+  (''.join(strs))
+    return full_desc
+
 def main(df=None):
     if df is None:
-        df = load_data()
+        df = storage.load_data()
     df = run(df)
     plot(df)
 
 def plot(df=None):
     if df is None:
-        df = load_data()
-    plotting.plot_ranks(df)
-
-def datastore_store(df):
-    df = df.copy()
-    df['vals'] = df['vals'].map(arr2str)
-    df['evals'] = df['evals'].map(arr2str)
-    df['evo_mode'] = df['evo_mode'].map(str)
-    df.to_hdf('data.h5','df', mode='a')
-    
-
-
-def load_data(name='df'):
-    try:
-        with pd.HDFStore('data.h5','r') as data_storage:
-            df = data_storage[name]
-            df['vals'] = df['vals'].map(str2arr(float))
-            df['evals'] = df['evals'].map(str2arr(int))
-            df['evo_mode'] = df['evo_mode'].map(str2evomode)
-            return df
-    except FileNotFoundError:
-                return None
-    
-
-def save_data(df, name='df'):
-    raise BaseException()
-    data_storage = pd.HDFStore('data.h5','w')
-    data_storage['df'] = df
-
-
+        df = storage.load_data()
+    plotting.plot(df)
 
 
 def run(df=None):
@@ -114,76 +97,87 @@ def run(df=None):
     rbf = lambda layers,gamma: (p(models.rbf_network,layers,gamma), f'elm{layers} {gamma}')
     gp = p(models.gp,GPK.Matern(nu=5/2)) , 'gp'
 
+    get_nth = lambda n, list: listmap(lambda a: a[n], list)
 
-
-    ansamble = lambda models,combination_f: lambda data: combination_f(np.stack([m(data) for m in models],0), axis=0)
-
+    def ansamble(combination_f, models): 
+        return (
+            lambda h,x,y,w,old_model: lambda data: combination_f(np.stack([m(h,x,y,w,None)(data) for m in get_nth(0,models)],0), axis=0), 
+            'ansamble_[' + '_'.join((get_nth(1,models))) + ']'
+        )
+    ans1 =ansamble(np.median,[gp,elm(200), rbf([1/2], 1)])
     configs = [ 
         ## pop_size, evolution_eval_mode, dim_reduction, model, train_num, sort_train, scale_train
+
+        # [1,pure,None,None, -1, False, False],
+        [2,pure,None,None, -1, False, False],
+        [4,pure,None,None, -1, False, False],
         [8,pure,None,None, -1, False, False],
         [16,pure,None,None, -1, False, False],
         [32,pure,None,None, -1, False, False],
         
+        [4,best_k(1.0/2),None,gp, 200, False, False],
+        [4,best_k(1.0/2),pca(1/2),gp, 200, False, False],
+        [4,best_k(1.0/2),vae([1/2]),gp, 200, False, False],
+        
         [8,best_k(1.0/2),None,gp, 200, False, False],
         [8,best_k(1.0/2),pca(1/2),gp, 200, False, False],
-        [8,best_k(1.0/2),vae([3/4,1/2]),gp, 200, False, False],
+        [8,best_k(1.0/2),vae([1/2]),gp, 200, False, False],
 
         [16*1,best_k(1.0/2),None,gp, 200, False, False],
         [16*1,best_k(1.0/2),pca(1/2),gp, 200, False, False],
-        [16*1,best_k(1.0/2),vae([3/4,1/2]),gp, 200, False, False],
+        [16*1,best_k(1.0/2),vae([1/2]),gp, 200, False, False],
         
         
         [16*2,best_k(1.0/2),None,gp, 200, False, False],
         [16*2,best_k(1.0/2),pca(1/2),gp, 200, False, False],
-        [16*2,best_k(1.0/2),vae([3/4,1/2]),gp, 200, False, False],
+        [16*2,best_k(1.0/2),vae([1/2]),gp, 200, False, False],
 
         [16*3,best_k(1.0/2),None,gp, 200, False, False],
         [16*3,best_k(1.0/2),pca(1/2),gp, 200, False, False],
-        [16*3,best_k(1.0/2),vae([3/4,1/2]),gp, 200, False, False],
+        [16*3,best_k(1.0/2),vae([1/2]),gp, 200, False, False],
         
         [8,best_k(1.0/4),None,gp, 200, False, False],
         [8,best_k(1.0/4),pca(1/2),gp, 200, False, False],
-        [8,best_k(1.0/4),vae([3/4,1/2]),gp, 200, False, False],
+        [8,best_k(1.0/4),vae([1/2]),gp, 200, False, False],
 
         [16*1,best_k(1.0/4),None,gp, 200, False, False],
         [16*1,best_k(1.0/4),pca(1/2),gp, 200, False, False],
-        [16*1,best_k(1.0/4),vae([3/4,1/2]),gp, 200, False, False],
+        [16*1,best_k(1.0/4),vae([1/2]),gp, 200, False, False],
         
         
         [16*2,best_k(1.0/4),None,gp, 200, False, False],
         [16*2,best_k(1.0/4),pca(1/2),gp, 200, False, False],
-        [16*2,best_k(1.0/4),vae([3/4,1/2]),gp, 200, False, False],
+        [16*2,best_k(1.0/4),vae([1/2]),gp, 200, False, False],
 
         [16*3,best_k(1.0/4),None,gp, 200, False, False],
         [16*3,best_k(1.0/4),pca(1/2),gp, 200, False, False],
-        [16*3,best_k(1.0/4),vae([3/4,1/2]),gp, 200, False, False],
-        
-        [8,best_k(1.0/8),None,gp, 200, False, False],
-        [8,best_k(1.0/8),pca(1/2),gp, 200, False, False],
-        [8,best_k(1.0/8),vae([3/4,1/2]),gp, 200, False, False],
+        [16*3,best_k(1.0/4),vae([1/2]),gp, 200, False, False],
 
         [16*1,best_k(1.0/8),None,gp, 200, False, False],
         [16*1,best_k(1.0/8),pca(1/2),gp, 200, False, False],
-        [16*1,best_k(1.0/8),vae([3/4,1/2]),gp, 200, False, False],
+        [16*1,best_k(1.0/8),vae([1/2]),gp, 200, False, False],
         
         [16*2,best_k(1.0/8),None,gp, 200, False, False],
         [16*2,best_k(1.0/8),pca(1/2),gp, 200, False, False],
-        [16*2,best_k(1.0/8),vae([3/4,1/2]),gp, 200, False, False],
+        [16*2,best_k(1.0/8),vae([1/2]),gp, 200, False, False],
 
         [16*3,best_k(1.0/8),None,gp, 200, False, False],
         [16*3,best_k(1.0/8),pca(1/2),gp, 200, False, False],
-        [16*3,best_k(1.0/8),vae([3/4,1/2]),gp, 200, False, False],
+        [16*3,best_k(1.0/8),vae([1/2]),gp, 200, False, False],
         
         [16*4,best_k(1.0/8),None,gp, 200, False, False],
         [16*4,best_k(1.0/8),pca(1/2),gp, 200, False, False],
-        [16*4,best_k(1.0/8),vae([3/4,1/2]),gp, 200, False, False],
+        [16*4,best_k(1.0/8),vae([1/2]),gp, 200, False, False],
+
+
+        [16,best_k(1.0/2),None, ans1, 200, False, False],
 
         
     ]
     for config in configs:
         res = single_config(config,budget,problem_info, df=df) 
+        storage.datastore_store_as_number(res)
         df = pd.concat([df, res], ignore_index=True)
-        datastore_store(df)
 
     return df
     
@@ -208,6 +202,12 @@ def single_config(config,budget,problem_info, df=None):
     observer = cocoex.Observer("bbob", opts)
 
     def run_problem(problem):
+        
+        return df_row
+
+    # results = Parallel(n_jobs=8, prefer="threads")(delayed(p(run_problem,observer,pops,surrs,dim_red,model, desc,trues,minimal_print))(problem) for problem in suite)
+    results = []
+    for problem in suite:
         fun, dim, ins = problem.id_triple
 
         # check whether those settings were already run and are stored in the dataframe
@@ -218,7 +218,7 @@ def single_config(config,budget,problem_info, df=None):
             is_run_duplicate = np.logical_and.reduce(masks,axis=1)
             is_run_duplicate = np.any(is_run_duplicate)
             if is_run_duplicate:
-                return None
+                continue
 
         observer.observe(problem)
         
@@ -244,15 +244,7 @@ def single_config(config,budget,problem_info, df=None):
         elapsed = end_time - start_time
         timestamp = datetime.now().strftime("%m_%d___%H_%M_%S")
         df_row = [vals, evals, pop_size,evo_mode,model_name,dim_red_name, ins, fun, dim, full_desc, elapsed, observer.result_folder, timestamp, budget, train_num, sort_train,scale_train]
-        return df_row
-
-    # results = Parallel(n_jobs=8, prefer="threads")(delayed(p(run_problem,observer,pops,surrs,dim_red,model, desc,trues,minimal_print))(problem) for problem in suite)
-    results = []
-    for problem in suite:
-        res = run_problem(problem)
-        if res != None:
-            results.append(res)
-
+        results.append(df_row)
 
     # list(zip(*l))
     # for problem in suite:  # this loop will take several minutes or longer
@@ -265,9 +257,11 @@ def single_config(config,budget,problem_info, df=None):
 
 
 if __name__ == '__main__':
-    df = load_data()
+    # ['pure', 'gp', 'elm', rbf]
+    df = storage.load_old(None, 'data/data.h5')
+    storage.store_data(df, 'df', 'data/datas.h5')
+    main()
     # df = run(df)
-    df = run(df)
-    plot(df)
+    # plot(df)
     # datastore_store(load_data(),'w')
     

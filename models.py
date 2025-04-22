@@ -1,8 +1,6 @@
 
 import sys
-import GP
 import VAE
-import evo
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
 import numpy as np
@@ -12,7 +10,7 @@ import tensorflow_addons as tfa
 import sklearn.gaussian_process.kernels as GPK
 import progress_bar
 import math
-from rbf_layer import RBFLayer
+from rbf_layer import InitCentersRandom, RBFLayer
 from functools import partial as p
 from functools import partial
 import VAE
@@ -73,12 +71,12 @@ def elm(h,x,y,w,model):
 
 def rbf_network(layers,gamma,x,y,w,model): 
     d = x.shape[-1]
-    layers = [int (d*n) for n in layers]
+    layers = [int(d*n) for n in layers]
     if model == None or model.layers[0].input_shape[0][-1] != d:
         inp = tf.keras.layers.Input(shape=d)
         feed = inp
         for n in layers:
-            feed = RBFLayer(n)(feed)# + (int(feed.shape[-1] == n) * feed if feed.shape[-1] == n else 0)
+            feed = RBFLayer(n,InitCentersRandom(x), gamma)(feed)# + (int(feed.shape[-1] == n) * feed if feed.shape[-1] == n else 0)
             # feed = tf.nn.relu(feed)
             # feed = tf.keras.layers.Dropout(0.2)(feed)
         outp = tf.keras.layers.Dense(1)(feed)
@@ -100,6 +98,7 @@ def mlp(layers,x,y,w,model):
             feed = tf.nn.relu(feed)
             # feed = tf.keras.layers.Dropout(0.2)(feed)
         outp = tf.keras.layers.Dense(1)(feed)
+        outp = tf.squeeze(outp,-1)
         model = tf.keras.Model(inputs=inp,outputs=outp)
         model.compile(optimizer=tfa.optimizers.AdamW(1e-4),loss = 'mse')
     model.fit(x,y,batch_size = int(x.shape[0]/10),epochs=5,verbose=0)
@@ -110,7 +109,28 @@ def mlp(layers,x,y,w,model):
 
 
 
-
+class ansamble :
+    @staticmethod 
+    def create(combination_f, models):
+        listmap = lambda func, collection: list(map(func, collection))
+        self = ansamble()
+        self.combination_f = combination_f
+        self.model_fs = listmap(lambda a: a[0], models)
+        self.model_descs = listmap(lambda a: a[1], models)
+        self.old_models = listmap(lambda _: None, self.model_fs)
+        return (
+            self,
+            'ansamble_[' + '&'.join(self.model_descs) + ']'
+        )
+    def __call__(self,h,x,y,w,_):
+        trained = [m(h,x,y,w,m_old) for (m,m_old) in zip(self.model_fs,self.old_models)]
+        self.old_models = trained
+        def eval(data):
+            called = [m(data) for m in trained]
+            stacked = np.stack(called,0),
+            combined = self.combination_f(stacked, axis=0)
+            return combined 
+        return eval
 
 
 

@@ -84,10 +84,7 @@ def get_surrogate(train_x, train_y,model_f,dim_red_f,old_model,old_dim_red,seed,
             ys = scaler.inverse_transform(np.expand_dims(ys, -1))
             ys = np.squeeze(ys,-1)
 
-
-        for d in [xs, ys, latent]: 
-            if np.any(np.isnan(d)):
-                print()
+        ys = np.nan_to_num(ys, nan=4.9)
         return ys
     
     
@@ -252,6 +249,7 @@ def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[
     elif isinstance(surrogate_usage, Pure):
         while true_evals_left > 0 :
             xs = np.array([optimizer.ask() for _ in range(pop_size)])
+            # xs = np.random.default_rng().choice(xs,pop_size, replace=False)
             if xs.shape[0] > true_evals_left:
                 xs = xs[:true_evals_left]
             ys = eval_true(xs)

@@ -1,10 +1,11 @@
 import numpy as np
 import pandas as pd
-from evo import Alternate_full_generations,Best_k,Pure
+from evo import Alternate_full_generations,Best_k,Pure, Doe
 import os
 import glob
 import numpy.ma as ma
-
+import pd_cols
+from doe2vec.doe2vec import doe_model 
 
 # arr2str = lambda arr: ' '.join(str(x) for x in arr)
 def arr2str(arr): 
@@ -18,13 +19,22 @@ def str2evomode(s):
         if s.startswith("Pure"): return Pure()
         elif s.startswith("BestK"):
             s1 = s[len("BestK"):]
-            return Best_k(float(s1) if '.' in s1 else int(s1), 1, 1) 
+            return Best_k(float(s1) if '.' in s1 else int(s1)) 
+        elif s.startswith("Doe"):
+            s = s[len("Doe_"):].split('&')
+            follow = str2evomode(s[0])
+            dim,power,latent = map(int,s[1].split('_'))
+            d = Doe(follow,dim,power,latent)
+            return d
         else: raise Exception
 def str2trueRatio(s):
             if s.startswith("Pure"): return 1
             elif s.startswith("BestK"):
                 s1 = s[len("BestK"):]
                 return float(s1) if '.' in s1 else int(s1)
+            elif s.startswith("Doe"):
+                s = s[len("Doe_"):].split('&')[0]
+                return str2trueRatio(s) # recurse into follow_up
             else: raise Exception
         
 
@@ -32,18 +42,20 @@ unzip = lambda a:list(map(list,list(zip(*a))))
 
 def store_data(df, name=None,  datastore='data/data.h5'):
     if df.empty: return
+
+    #ndarrays are stored separately as its way faster and takes less space
     vals = df['vals'].to_list()
     evals = df['evals'].to_list()
-
     max_len = max(map(len, vals))
     lenghts = np.stack((len(a) for a in vals),axis=0)
     vals = np.stack([np.pad(a, (0,max_len - len(a)), mode='empty') for a in vals],axis=0)
     evals = np.stack([np.pad(a, (0,max_len - len(a)), mode='empty') for a in evals],axis=0)
+    df = df.drop(columns=['vals','evals'], errors = 'ignore') 
     
-    df = df[['pop_size', 'evo_mode', 'model', 'dim_red', 'instance','function', 'dim', 'full_desc', 'elapsed_time', 'coco_directory', 'timestamp', 'true_eval_budget','train_num', 'sort_train','scale_train']]
-    # df = df.drop(columns=['vals','evals','true_ratio'], errors = 'ignore')
-    # df['vals'] = df['vals'].parallel_map(arr2str)
-    # df['evals'] = df['evals'].parallel_map(arr2str)
+    cs = pd_cols.all_cols.copy()
+    cs.remove('vals')
+    cs.remove('evals')
+    df = df[cs] # get rid of augmentations
     df['evo_mode'] = df['evo_mode'].map(str)
 
     with pd.HDFStore(datastore,'a') as data_storage:

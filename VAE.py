@@ -9,7 +9,7 @@ import time
 
 
 
-
+# from internet
 class VAE(tf.keras.Model):
     """Convolutional variational autoencoder."""
     def __init__(self, inp_size,layer_sizes):

@@ -8,9 +8,9 @@ import pandas as pd
 import math
 import datetime
 import seaborn as sns
+import pd_cols
 matplotlib.use('TkAgg')
 
-# print(matplotlib.get_backend())
 chunkyfy = lambda arr,window_size: np.array_split(arr, math.ceil(len(arr)/window_size))
 
 # computes relative order instead of absolute measurents => model performance can now be compared across different functions and instances
@@ -63,7 +63,7 @@ def compute_ranks(df):
             return df, master_evals
         
         df, common_eval = normalise_val_length(df)
-        df['ranks'] = df.groupby(['function', 'instance', 'dim','train_num', 'sort_train','scale_train'])['normalised_len_vals'].transform(to_ranks)
+        df['ranks'] = df.groupby(['function', 'instance', 'dim'])['normalised_len_vals'].transform(to_ranks)
         df = df.drop(['normalised_len_vals'], axis=1)
         return df, common_eval 
     

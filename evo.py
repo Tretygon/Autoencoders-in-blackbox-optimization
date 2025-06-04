@@ -14,8 +14,10 @@ from dataclasses import dataclass
 from scipy import stats
 from sklearn.preprocessing import StandardScaler
 
+import cocoex
 from cma.fitness_models import SurrogatePopulation
-
+from doe2vec.doe2vec import doe_model 
+from doe2vec.bbobbenchmarks import instantiate
 @dataclass
 class Alternate_full_generations:
     sur_gens_per_true: List[int]
@@ -25,8 +27,6 @@ class Alternate_full_generations:
 @dataclass
 class Best_k:
     k: Union[int,float]
-    retrain_every: int
-    generate_multiplier: float
     def __str__(self):
         return f'BestK{self.k}' 
 
@@ -35,74 +35,32 @@ class Pure:
     def __str__(self):
         return 'Pure'    
 
-
-
-def get_surrogate(train_x, train_y,model_f,dim_red_f,old_model,old_dim_red,seed,num_reconds_for_model_training = 200, sort_training_data = False, scale_training= False):
-    if dim_red_f == None: dim_red_f = lambda b,c,d: lambda a: a
-    if model_f == None: model_f = lambda b,c,d,e: lambda a: a
-    X = np.array(train_x)
-    Y = np.array(train_y) 
-
-
-    
-    xx,yy = X, Y
-    if scale_training:
-        scaler = StandardScaler()
-        yy = scaler.fit_transform(np.expand_dims(yy, -1))
-        yy = np.squeeze(yy,-1)
-    if sort_training_data: 
-        sorted = np.argsort(yy)
-        xx, yy = xx[sorted][::-1], yy[sorted][::-1]
-    if num_reconds_for_model_training != None:
-        strt = -num_reconds_for_model_training if num_reconds_for_model_training < X.shape[0] else 0
-        xx,yy = xx[strt:], yy[strt:]
-    if sort_training_data and num_reconds_for_model_training != None:  # shuffle the sorted data after the bad ones have been cut
-        rng = np.random.default_rng(seed=seed)
-        indexes = range(len(yy))
-        rng.shuffle(indexes)
-        xx, yy = xx[indexes], yy[indexes]
-
-    
-    # k = 1
-    # n = len(Y)
-    # weights = 1/(k*n + (np.arange(n)))
-    # s = np.argsort(Y)
-    # # chosen_i = np.random.choice(np.argsort(Y),size=len(Y),p=weights/np.sum(weights))
-    # chosen_i = s[:int(len(Y))]
-    # np.random.shuffle(chosen_i)
-    # X = X[chosen_i,:]
-    # Y = Y[chosen_i]
-    weights = None
-  
-    dim_red = dim_red_f(X,weights,old_dim_red)
-    latentX = dim_red(xx)
-    model = model_f(latentX,yy,weights,old_model)
-    def run(xs):
-        latent = dim_red(xs)
-        ys = model(latent)
-        if scale_training:
-            ys = scaler.inverse_transform(np.expand_dims(ys, -1))
-            ys = np.squeeze(ys,-1)
-
-        ys = np.nan_to_num(ys, nan=4.9)
-        return ys
-    
-    
+@dataclass
+class Doe: 
+    follow_up: Union[Best_k, Pure]
+    dim: int
+    power: int
+    latent: int
+    def __str__(self):
+        return self.__class__.__name__+'_' + str(self.follow_up) +'&'+ f'{self.dim}_{self.power}_{self.latent}'
 
 
 
-    return run, dim_red, model
+class Problem: 
+    f: callable
+    def __str__(self):
+        return self.__class__.__name__+str(self.model)
+            
+# type AAA = Union[Alternate_full_generations, Best_k, Pure, DOE]
 
-
-
-def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[Alternate_full_generations, Best_k, Pure],dim_red_f, model_f, train_num, sort_train,scale_train,printing=True,seed = 42):
-    bounds = np.stack([problem.lower_bounds,problem.upper_bounds],axis=0).T
+last_cached_doe = None
+def optimize(problem, surrogate, pop_size, true_evals, surrogate_usage:Union[Alternate_full_generations, Best_k, Pure, Doe], cma_sees_appoximations=False,printing=True,seed = 42, optimizer= None):
+    # bounds = np.stack([problem.lower_bounds,problem.upper_bounds],axis=0).T
     optimizer_popsize = pop_size
-    def new_optim():
-        nonlocal optimizer_popsize,bounds
+    def new_optim(dim=problem.dimension, optimizer_popsize=optimizer_popsize):
         # initial = np.random.rand(problem.dimension)*9 - 4.5
-        initial = np.zeros(problem.dimension)
-        return CMA(mean=initial, sigma=1.0, seed=seed,bounds=bounds,population_size=optimizer_popsize)
+        initial = np.zeros(dim)
+        return CMA(mean=initial, sigma=1.0, seed=seed,bounds=np.array([[-5.0,5.0]]*dim),population_size=optimizer_popsize)
     # if warm_start_task != None:
     #     source_solutions = []
     #     for _ in range(1000):
@@ -113,12 +71,10 @@ def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[
     #     # optimizer = CMA(mean=ws_mean, sigma=ws_sigma,cov=ws_cov,bounds=bounds,population_size=pop_size)
     # else:
        # should there be popsize or K???
-    optimizer = new_optim()
     current_model_uses = 0
     evals_wihout_change = 0
     true_xs= []
     true_ys= []
-    model,dim_red = None, None
     true_evals_left = true_evals 
     best = 9999999999
     best_x = np.zeros(problem.dimension)
@@ -127,9 +83,11 @@ def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[
     bests,bests_evals = [],[] #best found values overall and timestamps of currently used evaluations
     insert_best = False
     def eval_true(xs):
-        nonlocal true_evals_left,true_evals,bests,bests_evals,printing,best,problem,problem1,true_xs,true_ys,evals_wihout_change,optimizer,overall_best,best_x,overall_best_x
+        nonlocal true_evals_left,true_evals,bests,bests_evals,printing,best,problem,true_xs,true_ys,evals_wihout_change,optimizer,overall_best,best_x,overall_best_x
         ys = np.array([problem(x) for x in xs])
-        # ys1 = np.array([problem1(x) for x in xs])
+        ys = np.where(np.isinf(ys), 1e11, ys)
+        ys = np.where(np.isnan(ys), 1e11, ys)
+
         true_xs += list(xs)
         true_ys += list(ys)
         true_evals_left -= xs.shape[0]
@@ -168,11 +126,37 @@ def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[
             es.inject([ surrogate.model.xopt ])
             es.disp() # just checking what 's going one
         return es.best.f
-    elif isinstance(surrogate_usage,Best_k):
-        eval_best_k = surrogate_usage.k if isinstance(surrogate_usage.k,int) else int(pop_size * surrogate_usage.k)
+    if isinstance(surrogate_usage, Doe):
+        global last_cached_doe
+        if optimizer == None:
+            optimizer = new_optim(optimizer_popsize=optimizer_popsize)
+        if last_cached_doe == None or not (last_cached_doe.dim==surrogate_usage.dim and last_cached_doe.m == surrogate_usage.power and last_cached_doe.latent_dim==surrogate_usage.latent):
+            last_cached_doe = doe_model(dim=surrogate_usage.dim,m=surrogate_usage.power, latent_dim=surrogate_usage.latent)
+            last_cached_doe.load_or_train()
+        doe = last_cached_doe
+        fun, dim, ins = problem.id_triple
+        problem_info = f"function_indices:{fun} dimensions:{dim} instance_indices:{ins}"
+        suite = cocoex.Suite("bbob", "", problem_info) 
+        for p in suite:
+        # y = eval_true(doe.sample)
+            y = np.array([p(x) for x in doe.sample])
+            y = np.where(np.isinf(y), 1e11, y)
+            y = np.where(np.isnan(y), 1e11, y)
+
+        func_approx = doe.func_approx(y)
+        func_approx.dimension = problem.dimension
+        e, v, surrogate, optimizer= optimize(func_approx, surrogate, pop_size, int(1e3), Pure(), optimizer=optimizer)
+        surrogate_usage = surrogate_usage.follow_up
+        #continue with another surrogate_usage branch
+
+    if isinstance(surrogate_usage,Best_k):
+        generated_population = pop_size * surrogate_usage.k
+        eval_best_k = pop_size 
+        
         optimizer_popsize = eval_best_k
-        optimizer = new_optim()
-        retrain_rate = surrogate_usage.retrain_every
+        if optimizer == None:
+            optimizer = new_optim(optimizer_popsize=optimizer_popsize)
+        # retrain_rate = surrogate_usage.retrain_every
         # surrogate = SurrogatePopulation(problem)
         # optimizer.inject()
         
@@ -191,9 +175,9 @@ def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[
             ys = eval_true(xs)
             # if optimizer.population_size == surrogate_usage.k:
             optimizer.tell(list(zip(xs,ys))) 
-        surrogate,dim_red,model = get_surrogate(true_xs,true_ys,model_f,dim_red_f,model,dim_red, train_num, sort_train,scale_train)
+        surrogate.train(true_xs,true_ys)
         while true_evals_left > 0:
-            xs = np.array([optimizer.ask() for _ in range(int(pop_size*abs(surrogate_usage.generate_multiplier)))])
+            xs = np.array([optimizer.ask() for _ in range(int(generated_population))])
             ys = surrogate(xs) 
             sorted_i = tf.argsort(ys).numpy()
             xs,ys = np.array(xs)[sorted_i], np.array(ys)[sorted_i]
@@ -210,28 +194,28 @@ def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[
                         print()
                 aaa = [problem(x) for x in pop[np.logical_not(mask)]]
                 pop,ys = pop[mask], ys[mask]
-            xs,ys = xs[:pop_size], ys[:pop_size]
+            xs,ys = xs[:generated_population], ys[:generated_population] 
             k = min(true_evals_left,eval_best_k)
             top_k_xs = xs[:k]  
             top_k_ys = eval_true(top_k_xs)
-            surrogate,dim_red,model = get_surrogate(true_xs,true_ys,model_f,dim_red_f,model,dim_red,train_num, sort_train,scale_train)
+            surrogate.train(true_xs,true_ys)
 
-            if true_evals_left == 0:
+            if true_evals_left <= 0:
                 pass # the training is at the end, no need to tell the optimizer anything anymore 
                      # also throws errors bc the final population size may be inconpatible with the one the optimizer has 
-            elif False and generation == 0 and optimizer.population_size == pop_size:
-                unreported_x = np.array(true_xs)[:-(k+unreported)]
-                unreported_y = np.array(true_ys)[:-(k+unreported)]
-                res_y = np.concatenate([unreported_y,ys[len(unreported_y):]])
-                res_x = np.concatenate([unreported_x,xs[len(unreported_x):]])
-                optimizer.tell(list(zip(res_x,res_y))) 
-            elif optimizer.population_size == pop_size and pop_size > surrogate_usage.k: # report the entire population, not just the true evaluated
-                ys = surrogate(xs) #extra surrogate eval to guarantee the freshest data
+            # elif False and generation == 0 and optimizer.population_size == pop_size:
+            #     unreported_x = np.array(true_xs)[:-(k+unreported)]
+            #     unreported_y = np.array(true_ys)[:-(k+unreported)]
+            #     res_y = np.concatenate([unreported_y,ys[len(unreported_y):]])
+            #     res_x = np.concatenate([unreported_x,xs[len(unreported_x):]])
+            #     optimizer.tell(list(zip(res_x,res_y))) 
+            elif cma_sees_appoximations and generated_population > surrogate_usage.k: # report the entire population, not just the true evaluated
+                ys = surrogate(xs) #extra surrogate eval to guarantee the freshest approximations
                 res_y = np.concatenate([top_k_ys,ys[k:]])
                 optimizer.tell(list(zip(xs,res_y))) 
             else:
                 if insert_best:
-                    m = np.argmax(top_k_ys)
+                    m = np.argmax(top_k_ys) # replace the current worst with so far best
                     top_k_ys[m] = best
                     top_k_xs[m] = best_x
                 optimizer.tell(list(zip(top_k_xs,top_k_ys))) 
@@ -244,12 +228,13 @@ def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[
             
             generation += 1    
         
-        return np.array(bests_evals), np.array(bests)
+        
 
-    elif isinstance(surrogate_usage, Pure):
+    if isinstance(surrogate_usage, Pure):
+        if optimizer == None:
+            optimizer = new_optim(optimizer_popsize=pop_size)
         while true_evals_left > 0 :
             xs = np.array([optimizer.ask() for _ in range(pop_size)])
-            # xs = np.random.default_rng().choice(xs,pop_size, replace=False)
             if xs.shape[0] > true_evals_left:
                 xs = xs[:true_evals_left]
             ys = eval_true(xs)
@@ -259,10 +244,10 @@ def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[
             if true_evals_left > 0:
                 optimizer.tell(list(zip(xs,ys))) 
             generation += 1
-        # print(problem.final_target_fvalue1)
-        return np.array(bests_evals), np.array(bests)
 
-    elif isinstance(surrogate_usage, Alternate_full_generations):
+    if isinstance(surrogate_usage, Alternate_full_generations):
+        if optimizer == None:
+            optimizer = new_optim(optimizer_popsize=optimizer_popsize)
         surrogate_evals_per_true = surrogate_usage.sur_gens_per_true
         surrogate_ever_needed = any(map(lambda a: a > 0, surrogate_evals_per_true))
         surr_eval_i = 0
@@ -324,7 +309,9 @@ def run_surrogate(problem,problem1, pop_size, true_evals, surrogate_usage:Union[
         return (best, np.min(true_ys))
 
     
-    else: raise Exception('unknown surrogate_usage')
+    if len(bests)==0: raise Exception('unknown surrogate_usage')
+
+    return np.array(bests_evals), np.array(bests), surrogate, optimizer
 
 
 

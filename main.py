@@ -72,7 +72,7 @@ def plot(df=None):
         df = storage.load_data()
     ranks.plot(df)
 
-note = 'no_optim'
+note = 'no_mean'
 def run(df=None):
     global dim, budget
     problem_info = f"function_indices:1-24 dimensions:{dim} instance_indices:1-3"
@@ -128,17 +128,19 @@ def run(df=None):
         # [36,best_k(1.0/12),pca(5/10),gp, 200, False, False],
 
 
-        # [222,best_k(1.0/8),None,gp, budget, 200, False, False, False],
         # [8,doe(40, 1, pure),None,None, budget, 200, False, False, False],
         # [8,doe(40, 2, pure),None,None, budget, 200, False, False, False],
         # [8,doe(40, 3, pure),None,None, budget, 200, False, False, False],
         # [8,doe(40, 4, pure),None,None, budget, 200, False, False, False],
         # [8,doe(40, 5, pure),None,None, budget, 200, False, False, False],
         # [8,doe(40, 6, pure),None,None, budget, 200, False, False, False],
-        # # [8,doe(40, 9, best_k(8)),None,gp, budget, 200, False, False, False],
+        # [8,doe(40, 7, pure),None,None, budget, 200, False, False, False],
+        [8,doe(100, 8, pure),None,None, budget, 201, False, False, False],
+        # [8,doe(40, 9, pure),None,None, budget, 200, False, False, False],
+        # [8,doe(40, 10, pure),None,None, budget, 200, False, False, False],
     ]
-    for i in range(2,33):
-        configs.append([i,pure,None,None,budget, -1, False, False, False])
+    # for i in range(2,33):
+    #     configs.append([i,pure,None,None,budget, -1, False, False, False])
 
 
     # for mult in [2,4,6,8,12,16]:
@@ -180,8 +182,8 @@ def single_config(config,problem_info, df=None):
 
     # filter already done experiments to find those same as this one
     if df_filtered is not None:
-            vals = [pop_size,evo_mode,model_name ,dim_red_name, budget, train_num, sort_train, scale_train, cma_sees_appoximations]
-            assert(len(pd_cols.determining_cols) == (len(vals)+1))
+            vals = [pop_size,evo_mode,model_name ,dim_red_name, budget, train_num, note]
+            assert(len(pd_cols.determining_cols) == len(vals))
             df_filtered = df
             for n,v in zip(pd_cols.determining_cols,vals):
                 df_filtered = df_filtered[df_filtered[n]==v]
@@ -207,7 +209,7 @@ def single_config(config,problem_info, df=None):
         observer.observe(problem)
         start_time = timer()
 
-        evals, vals, trained_model, optimizer = evo.optimize(
+        evals, vals, s, o,rxs = evo.optimize(
             problem,
             surrogate,
             pop_size = pop_size, 
@@ -243,6 +245,8 @@ if __name__ == '__main__':
     # plot(df)
     # datastore_store(load_data(),'w')
 
-    df_og = storage.merge_and_load()
-    df_og = run(df_og)
+    # df_og = storage.merge_and_load()
+    # df_og = run(df_og)
+
+    from doe2vec import exp_bbob
     

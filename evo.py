@@ -61,6 +61,14 @@ def optimize(problem, surrogate, pop_size, true_evals, surrogate_usage:Union[Alt
         # initial = np.random.rand(problem.dimension)*9 - 4.5
         initial = np.zeros(dim)
         return CMA(mean=initial, sigma=1.0, seed=seed,bounds=np.array([[-5.0,5.0]]*dim),population_size=optimizer_popsize)
+    next_specimens_forced = []
+    def next_gen(size=optimizer_popsize):
+        nonlocal next_specimens_forced
+        forced = next_specimens_forced[:size]
+        next_specimens_forced = next_specimens_forced[size:]
+        xs = np.array(forced+[optimizer.ask() for _ in range(size-len(forced))])
+        return xs
+        
     # if warm_start_task != None:
     #     source_solutions = []
     #     for _ in range(1000):
@@ -137,22 +145,25 @@ def optimize(problem, surrogate, pop_size, true_evals, surrogate_usage:Union[Alt
         fun, dim, ins = problem.id_triple
         problem_info = f"function_indices:{fun} dimensions:{dim} instance_indices:{ins}"
         suite = cocoex.Suite("bbob", "", problem_info) 
-        for p in suite:
-        # y = eval_true(doe.sample)
-            y = np.array([p(x) for x in doe.sample])
-            y = np.where(np.isinf(y), 1e11, y)
-            y = np.where(np.isnan(y), 1e11, y)
+        for p in suite: #only one item
+            # y = eval_true(np.clip(doe.sample*10 - 5,-4.99, 4.99))
+            y = np.array([p(x) for x in np.clip(doe.sample*10 - 5,-4.99, 4.99)])
+            mx = np.nanmax(y[y != np.inf])
+            y = np.where(np.isinf(y), mx, y)
+            y = np.where(np.isnan(y), mx, y)
 
-        func_approx = doe.func_approx(y)
+        func_approx_, dist = doe.func_approx(y)
+        func_approx = lambda x: func_approx_(x,False)
         func_approx.dimension = problem.dimension
-        e, v, surrogate, optimizer= optimize(func_approx, surrogate, pop_size, int(1e3), Pure(), optimizer=optimizer)
+        e, v, s, o, rxs= optimize(func_approx, surrogate, pop_size, int(3e2), Pure())
+        # next_specimens_forced = [o.ask() for _ in range(2*pop_size)]
+        next_specimens_forced = rxs[-2*pop_size:]
         surrogate_usage = surrogate_usage.follow_up
         #continue with another surrogate_usage branch
 
     if isinstance(surrogate_usage,Best_k):
         generated_population = pop_size * surrogate_usage.k
         eval_best_k = pop_size 
-        
         optimizer_popsize = eval_best_k
         if optimizer == None:
             optimizer = new_optim(optimizer_popsize=optimizer_popsize)
@@ -171,13 +182,13 @@ def optimize(problem, surrogate, pop_size, true_evals, surrogate_usage:Union[Alt
         #         optimizer.tell(list(zip(true_xs[unreported_offset:unreported_offset+optimizer.population_size],true_ys[unreported_offset:unreported_offset+optimizer.population_size])))
         #         unreported -= optimizer.population_size
         for _ in range(1):
-            xs = np.array([optimizer.ask() for _ in range(optimizer.population_size)])
+            xs = next_gen(optimizer_popsize)
             ys = eval_true(xs)
             # if optimizer.population_size == surrogate_usage.k:
             optimizer.tell(list(zip(xs,ys))) 
         surrogate.train(true_xs,true_ys)
         while true_evals_left > 0:
-            xs = np.array([optimizer.ask() for _ in range(int(generated_population))])
+            xs = next_gen(generated_population)
             ys = surrogate(xs) 
             sorted_i = tf.argsort(ys).numpy()
             xs,ys = np.array(xs)[sorted_i], np.array(ys)[sorted_i]
@@ -234,7 +245,7 @@ def optimize(problem, surrogate, pop_size, true_evals, surrogate_usage:Union[Alt
         if optimizer == None:
             optimizer = new_optim(optimizer_popsize=pop_size)
         while true_evals_left > 0 :
-            xs = np.array([optimizer.ask() for _ in range(pop_size)])
+            xs = next_gen()
             if xs.shape[0] > true_evals_left:
                 xs = xs[:true_evals_left]
             ys = eval_true(xs)
@@ -311,7 +322,7 @@ def optimize(problem, surrogate, pop_size, true_evals, surrogate_usage:Union[Alt
     
     if len(bests)==0: raise Exception('unknown surrogate_usage')
 
-    return np.array(bests_evals), np.array(bests), surrogate, optimizer
+    return np.array(bests_evals), np.array(bests), surrogate, optimizer, true_xs
 
 
 

@@ -25,7 +25,7 @@ import tensorflow
 from tensorflow.keras import layers, losses
 from tensorflow.keras.models import Model
 
-from doe2vec import bbobbenchmarks as bbob
+# from doe2vec import bbobbenchmarks as bbob
 from doe2vec.models import VAE, Autoencoder
 from doe2vec.modulesRandFunc import generate_exp2fun as genExp2fun
 from doe2vec.modulesRandFunc import generate_tree as genTree
@@ -87,10 +87,9 @@ class doe_model:
         # generate the DOE using Sobol
         if custom_sample is None:
             self.sampler = qmc.Sobol(d=self.dim, scramble=False, seed=self.seed)
-            self.sample = self.sampler.random_base2(m=self.m)*10 - 5.0
-            self.sample = np.where(self.sample == 0.0, 1e-3, self.sample)
-            self.sample = np.where(self.sample == 5.0, 4.999, self.sample)
-            self.sample = np.where(self.sample == -5.0, -4.999, self.sample)
+            self.sample = self.sampler.random_base2(m=self.m)
+            # self.sample = np.where(self.sample == 0.0, 1e-2, self.sample)
+            self.sample = np.clip(self.sample, 0.01, 0.99)
         else:
             self.sample = custom_sample
         self.use_mlflow = use_mlflow
@@ -107,40 +106,7 @@ class doe_model:
             mlflow.log_param("seed", self.seed)
     def __str__(self):
         return f'doe_{self.dim}-{self.m}-{self.latent_dim}'
-    def load_from_huggingface(self, repo="BasStein"):
-        """Load a pre-trained model from a HuggingFace repository.
-
-        Args:
-            repo (str, optional): the huggingface repo to load from.
-        """
-        model_name = f"{repo}/doe2vec-d{self.dim}-m{self.m}-ls{self.latent_dim}-{self.pure_model_type}-kl{self.kl_weight}"
-        data_name = f"{repo}/{self.n}-randomfunctions-{self.dim}d"
-        dataset = load_dataset(data_name)["train"]
-        self.autoencoder = from_pretrained_keras(model_name)
-        self.autoencoder.compile(optimizer="adam")
-        self.functions = dataset["function"]
-        self.Y = []
-        array_x = (
-            self.sample
-        )  # this seemingly unused variable is required by the eval() later on
-        if not sys.warnoptions:
-            warnings.simplefilter("ignore")
-        for fun in self.functions:
-            try:
-                array_y = eval(fun)
-                array_y = array_y.flatten()[:,np.newaxis]
-                scaler = sklearn.preprocessing.StandardScaler().fit(array_y)
-                array_y = scaler.transform(array_y)[:,0]
-                self.Y.append(array_y)
-                self.scalers.append(scaler)
-            except:
-                continue
-        warnings.simplefilter("default")
-        self.setData(self.Y)
-        print("Loaded huggingface model and data")
-        self.summary()
-        self.fitNN()
-        return True
+    
 
     def load_or_train(self):
         if self.loaded: return
@@ -161,7 +127,7 @@ class doe_model:
                 np.save(f"{self.fun_save_path}", self.functions)
             # self.functions = [eval('lambda array_x: '+f) for f in self.functions]
             self.compile()
-            self.fit(100)
+            self.fit(20)
             os.makedirs(self.save_path)
             self.autoencoder.save(f'{self.save_path}/model')
             np.save(f"{self.save_path}/func_mask.npy",self.func_mask)
@@ -178,8 +144,6 @@ class doe_model:
                 tree = genTree.generate_tree(6, 16)
                 exp = genTree2exp.generate_tree2exp(tree)
                 fun = genExp2fun.generate_exp2fun(exp)
-                # fun = fun + '[:,0]'
-                # fun = 'np.squeeze('+ fun + '[:,0]'
                 fun = '('+fun + ')[:,0]'
                 yield fun
 
@@ -191,15 +155,12 @@ class doe_model:
         if not sys.warnoptions:
             warnings.simplefilter("ignore")
         array_x = self.sample
-        
         iters = 0 
         for fun in fun_gen():
             iters_per_succ = iters/max(len(self.Y),1)
             if len(self.func_mask) >= self.n: break
             iters += 1
             try:
-                # f = eval('lambda array_x:'+fun)
-                # f = numba.jit(nopython=True)(f)
                 array_y = eval(fun)
                 if (#nonrecoverable
                     np.isnan(array_y).any()
@@ -214,7 +175,7 @@ class doe_model:
                     if (np.var(array_y*10) < 1.0):
                         continue
                     else:
-                        fun = '10*'+fun
+                        fun = '10*('+fun+')'
 
                         
                 self.functions.append(fun)
@@ -228,15 +189,18 @@ class doe_model:
         warnings.simplefilter("default")
         # assert(len(provided_functions) == 0 or iters==self.n)
         
-        self.Y = np.array(self.Y)
+        self.Y = self.normalise_y(np.array(self.Y))
         self.functions = np.array(self.functions)
         self.func_mask = np.array(self.func_mask)
 
     def normalise_y(self,y):
-        m = np.mean(y, axis=1)[:,np.newaxis]
-        std = np.std(y,axis=1)[:,np.newaxis]
-        std = np.where(std==0.0, 1, std)
-        y_normed = (y-m)/std
+        # m = np.mean(y, axis=1)[:,np.newaxis]
+        # std = np.std(y,axis=1)[:,np.newaxis]
+        # std = np.where(std==0.0, 1, std)
+        # y_normed = (y-m)/std
+        mn = np.min(y,axis=1)[:,np.newaxis]
+        mx = np.max(y,axis=1)[:,np.newaxis]
+        y_normed = (y-mn)/(mx-mn)
         return y_normed
     
     def compile(self):
@@ -252,65 +216,52 @@ class doe_model:
         """
         if self.autoencoder is None:
             raise AttributeError("Autoencoder model is not compiled yet")
-        if self.use_mlflow:
-            mlflow.tensorflow.autolog(every_n_iter=1)
 
-        train = tf.cast(self.normalise_y(self.Y[:-50]), tf.float32)
-        test = tf.cast(self.normalise_y(self.Y[-50:]), tf.float32)
-        if self.use_VAE:
-            self.autoencoder.fit(
-                train,
+        self.autoencoder.fit(
+                tf.cast(self.Y[:-50], tf.float32),
                 epochs=epochs,
                 batch_size=batch_size,
                 shuffle=True,
-                validation_data=(test,test),
+                validation_data=((te:=tf.cast(self.Y[-50:], tf.float32)),te),
                 **kwargs,
             )
-        else:
-            self.autoencoder.fit(
-                train,
-                train,
-                epochs=epochs,
-                batch_size=batch_size,
-                shuffle=True,
-                validation_data=(test,test),
-                **kwargs,
-            )
-        if self.use_mlflow:
-            self.plot_label_clusters_bbob()
-            self.visualizeTestData()
-            mlflow.end_run()
 
     # finds the closest training function to the one provided
-    def func_approx(self, y, refit=False):
-        latent = self.encode(y, norm=True)
-        if not self.fitted or refit:
-            encoded_Y = self.encode(self.normalise_y(self.Y))
+    def func_approx(self, y, scale_inp=True):
+        if len(y.shape==1): 
+            y = y.reshape(1, -1)
+        latent = self.encode(y,norm=True)
+        if not self.fitted:
+            encoded_Y = self.encode(self.Y)
             self.nn= NearestNeighbors(n_neighbors=1, algorithm="ball_tree").fit(encoded_Y)
-            self.fitted = True
-        _, i = self.nn.kneighbors(latent.reshape(1, -1))
+        if len(latent.shape==1): 
+            latent = latent.reshape(1, -1)
+        dist, i = self.nn.kneighbors(latent)
         i = i[0]
         
         best_approx_str = self.functions[i][0]
         best_approx_f = eval('lambda array_x:'+best_approx_str)
-        # best_approx_f = numba.jit(nopython=True)(best_approx_f)
 
-        real_mean = y.mean()
-        real_std = y.std()
-        approx_y = self.Y[i,:]
-        approx_y_mean = approx_y.mean()
-        approx_y_std = approx_y.std()
+        # real_mean = y.mean()
+        # real_std = y.std()
+        # approx_y = self.Y[i,:]
+        # approx_y_mean = approx_y.mean()
+        # approx_y_std = approx_y.std()
 
-        def func_approx(array_x,scale=True):
-            e = best_approx_f(array_x[np.newaxis,:])
-            if scale:
-                e = (e-approx_y_mean)/approx_y_std # approx_y 'knows' how is this func scaled, the evaluation needs to be normalised accordingly
-                e = e *real_std  + real_mean # take the normalised vector and turn it the real values of the true bbob func
-            return e[0]
+        def run_approx(array_x):
+            if (added_dim := len(array_x.shape)==1):
+                array_x = array_x[np.newaxis,:]
+            if scale_inp:
+                array_x = (array_x + 5.0)/10 #scale from bbob vals to 0-1
+            e = best_approx_f(array_x)
+            # if scale:
+            #     e = (e-approx_y_mean)/approx_y_std # approx_y 'knows' how is this func scaled, the evaluation needs to be normalised accordingly
+            #     e = e *real_std  + real_mean # take the normalised vector and turn it the real values of the true bbob func
+            return e[0] if added_dim else e
         # func_approx = lambda array_x:  #scale the apmproximation down to zero mean 1var, then scale this to the y values
-        return func_approx
+        return run_approx, dist[0]
     
-    def encode(self, y:np.ndarray, norm=True):
+    def encode(self, y:np.ndarray, norm=False):
         """Encode a Design of Experiments.
 
         Args:

@@ -71,13 +71,12 @@ def generate_exp2fun(exp):
     for item in exp_flat:
 
         if item < 0:
-            str_main.append(f"(np.abs({item}))")
+            str_main.append(f"(abs({item}))")
 
         else:
             if item == 1:
                 # Real number in 1-10
-                s = random.random() * 9 + 1
-                str_main.append(f'{s:3f}')
+                str_main.append(str(random.random() * 9 + 1))
 
             elif item == 2:
                 # Decision vector
@@ -85,29 +84,31 @@ def generate_exp2fun(exp):
 
             elif item == 3:
                 # First decision variable
-                str_main.append("array_x[:,0,np.newaxis]")
+                str_main.append("array_x[:,0]")
 
             elif item == 4:
                 # Translated decision vector
                 str_main.append(
-                    "(np.concatenate((array_x[:,1:], np.zeros((len(array_x), 1))), axis=1))"
+                    "(np.vstack((array_x[:,1:].ravel(), np.zeros((len(array_x), 1)).ravel())).T)"
                 )
 
             elif item == 5:
                 # Rotated decision vector
-                seed = np.random.randint(0,999999)
-                str_main.append(f"(np.dot(array_x, np.random.default_rng({seed}).random((array_x.shape[1], array_x.shape[1]))))")
                 # mat_rand = str(np.random.rand(dim_y, dim_y).tolist())
                 # str_main.append(f"(np.dot(array_x, np.array({mat_rand})))")
 
+                seed = np.random.randint(0,999999)
+                str_main.append(f"(np.dot(array_x, np.random.default_rng({seed}).random((array_x.shape[1], array_x.shape[1]))))")
             elif item == 6:
                 # Index vector
-                str_main.append("(np.arange(1, array_x.shape[1]+1))")
+                str_main.append("(np.array(range(1, array_x.shape[1]+1)))")
 
             elif item == 7:
                 # Random number in 1-1.1
-                seed = np.random.randint(0,999999)
                 # mat_rand = str(np.random.rand(dim_x, 1).tolist())
+                # str_main.append(f"(1+np.array({mat_rand})/10)")
+
+                seed = np.random.randint(0,999999)
                 str_main.append(f"(1+np.random.default_rng({seed}).random((len(array_x),1))/10)")
 
             elif item == 11:
@@ -144,11 +145,11 @@ def generate_exp2fun(exp):
 
             elif item == 25:
                 # Square root
-                str_main = str_main[:-1] + ["np.sqrt(np.abs(" + str_main[-1] + "))"]
+                str_main = str_main[:-1] + ["np.sqrt(abs(" + str_main[-1] + "))"]
 
             elif item == 26:
                 # Absolute value
-                str_main = str_main[:-1] + ["np.abs(" + str_main[-1] + ")"]
+                str_main = str_main[:-1] + ["abs(" + str_main[-1] + ")"]
 
             elif item == 27:
                 # Rounded value
@@ -165,7 +166,7 @@ def generate_exp2fun(exp):
 
             elif item == 30:
                 # Logarithm
-                str_main = str_main[:-1] + ["np.log(np.abs(" + str_main[-1] + "))"]
+                str_main = str_main[:-1] + ["np.log(abs(" + str_main[-1] + "))"]
 
             elif item == 31:
                 # Exponent
@@ -173,27 +174,23 @@ def generate_exp2fun(exp):
 
             elif item == 32:
                 # Sum of vector
-                str_main = str_main[:-1] + ["np.sum(" + str_main[-1] + ", axis=1)[:,np.newaxis]"]
+                str_main = str_main[:-1] + ["np.sum(" + str_main[-1] + ", axis=1)"]
 
             elif item == 33:
                 # Mean of vector
-                str_main = str_main[:-1] + ["np.mean(" + str_main[-1] + ", axis=1)[:,np.newaxis]"]
-                # seed = np.random.randint(0,999999)
-                # mat_rand = str(np.random.rand(dim_x, 1).tolist())
-                # str_main = str_main[:-1] + [str_main[-1] + f"[:,np.random.default_rng({seed}).integers(high=array_x.shape[1])][:,np.newaxis]"]
-                
+                str_main = str_main[:-1] + ["np.mean(" + str_main[-1] + ", axis=1)"]
 
             elif item == 34:
                 # Cumulative sum of vector
-                str_main = str_main[:-1] + ["np.cumsum(" + str_main[-1] + ",axis=-1)"]
+                str_main = str_main[:-1] + ["np.cumsum(" + str_main[-1] + ", axis=1)"]
 
             elif item == 35:
                 # Product of vector
-                str_main = str_main[:-1] + ["np.prod(" + str_main[-1] + ", axis=1)[:,np.newaxis]"]
+                str_main = str_main[:-1] + ["np.prod(" + str_main[-1] + ", axis=1)"]
 
             elif item == 36:
                 # Maximum of vector
-                str_main = str_main[:-1] + ["np.amax(" + str_main[-1] + ", axis=1)[:,np.newaxis]"]
+                str_main = str_main[:-1] + ["np.amax(" + str_main[-1] + ", axis=1)"]
 
             else:
                 raise ValueError(f"Operator {item} is not defined!")

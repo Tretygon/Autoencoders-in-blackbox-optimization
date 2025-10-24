@@ -27,29 +27,29 @@ def createSurfacePlot(bbob_fun, gen_fun, dist, name="bbobx", title="f_x" ):
     X, Y = np.meshgrid(X, Y)
     positions = np.vstack([X.ravel(), Y.ravel()]).T
     positions = np.clip(positions, -4.99, 4.99)
-    positions = np.where(positions==0, 0.01, positions)
-    z1 = np.asarray(list(map(bbob_fun, positions))).reshape(100, 100)
+
+
+    
+    z1 = np.asarray(list(map(bbob_fun, np.where(positions==0, 0.01, positions)))).reshape(100, 100)
+    perc = np.percentile(z1,75, keepdims=True)
+    z1 = np.clip(z1,a_max=perc, a_min=None)
 
     ax = fig.add_subplot(1, 2, 1, projection="3d")
     # Plot the surface.
-    surf = ax.plot_surface(X, Y, z1, cmap=cm.coolwarm, linewidth=1, antialiased=True)
+    surf = ax.plot_surface(X, Y, z1, cmap=cm.coolwarm_r , linewidth=1, antialiased=True)
     no_descs(ax)
     plt.title(title)
     # Add a color bar which maps values to colors.
     # fig.colorbar(surf, shrink=0.5, aspect=5)
 
     # Generated fun
-    X2 = np.arange(0, 1, 0.01)
-    Y2 = np.arange(0, 1, 0.01)
-    X2, Y2 = np.meshgrid(X2, Y2)
-    array_x = np.vstack([X2.ravel(), Y2.ravel()]).T
-    array_x = np.clip(array_x, -0.01, 0.99)
-    z2 = gen_fun(array_x)
-    # z2 = eval(gen_fun)
+    z2 = gen_fun(positions)
     z2 = np.array(z2).reshape(100, 100)
+    perc = np.percentile(z2,75, keepdims=True)
+    z2 = np.clip(z2,a_max=perc, a_min=None)
     # second
     ax = fig.add_subplot(1, 2, 2, projection="3d")
-    surf = ax.plot_surface(X2, Y2, z2, cmap=cm.coolwarm, linewidth=1, antialiased=True)
+    surf = ax.plot_surface(X, Y, z2, cmap=cm.coolwarm_r , linewidth=1, antialiased=True)
     no_descs(ax)
     plt.title(str(dist))
 
@@ -67,11 +67,11 @@ sample = np.clip(sample, -4.99, 4.99)
 sample = np.where(sample==0, 0.01, sample)
 
 for f in range(1, 25):
-    for i in [1]:
+    for i in [5]:
         fun, opt = bbob.instantiate(f, i)
         name = f"nearest_f_plot/bbob-f-{f}-i-{i}"
         bbob_y = np.asarray(list(map(fun, sample)))
-        approx, dist = doe.func_approx(bbob_y,scale=False)
+        approx, dist = doe.func_approx(bbob_y,scale_inp=True)
         # print(f, i)
         createSurfacePlot(fun, approx, dist, name, "$f_{" + str(f) + "}$ instance " + str(i))
 

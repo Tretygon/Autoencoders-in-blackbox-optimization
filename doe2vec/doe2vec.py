@@ -24,37 +24,73 @@ from sklearn.neighbors import NearestNeighbors
 import tensorflow
 from tensorflow.keras import layers, losses
 from tensorflow.keras.models import Model
-
+from timeit import default_timer as timer
+import itertools
+import math
 # from doe2vec import bbobbenchmarks as bbob
-from doe2vec.models import VAE, Autoencoder
+from doe2vec.vae import VAE
 from doe2vec.modulesRandFunc import generate_exp2fun as genExp2fun
 from doe2vec.modulesRandFunc import generate_tree as genTree
 from doe2vec.modulesRandFunc import generate_tree2exp as genTree2exp
-import numba
+from concurrent.futures import ProcessPoolExecutor
+
+from scipy.spatial import distance_matrix
+from scipy.optimize import linear_sum_assignment
+from multiprocessing import Process, Pipe
+
 def no_descs(ax):
         for axis in [ax.xaxis, ax.yaxis, ax.zaxis]:
             axis.set_ticklabels([])
             for line in axis.get_ticklines():
                 line.set_visible(False)
+def eval_multiple(fs, array_x):
+    fs = [a+' ' for a in fs]
+    y = []
+    orig_settings = np.seterr(all='raise')
+    for f in fs:
+        try:
+            y.append(eval(f))
+        except:
+            y.append(None)
+    np.seterr(**orig_settings)
+    return y
+# def evaluator(conn):
+#     import numpy as np
+#     fs = conn.recv()
+#     fs = [eval('lambda array_x:'+f) for f in fs]
+#     orig_settings = np.seterr(all='raise')
+#     while True:
+#         y = []
+#         array_x = np.array(conn.recv())
+#         for f in fs:
+#             try:
+#                 y.append(f(array_x))
+#             except:
+#                 y.append(None)
+#         conn.send(y)
+#     np.seterr(**orig_settings)
+#     return y
+def group_list(l, group_size):
+    """
+    :param l:           list
+    :param group_size:  size of each group
+    :return:            Yields successive group-sized lists from l.
+    """
+    for i in range(0, len(l), group_size):
+        yield l[i:i+group_size]
 
 class doe_model:
     def __init__(
         self,
-        dim,
-        m,
-        n=250_000,
-        latent_dim=20,
+        inp_size,
+        latent_dim,
+        n_functions=50_000,
         seed_nr=0,
-        kl_weight=0.001,
-        custom_sample=None,
-        use_mlflow=False,
-        mlflow_name="Doc2Vec",
-        model_type="VAE",
+        kl_weight=0.001
     ):
         """Doe2Vec model to transform Design of Experiments to feature vectors.
 
         Args:
-            dim (int): Number of dimensions of the DOE
             m (int): Power for number of samples used in the Sobol sampler (not used for custom_sample)
             n (int, optional): Number of generated functions to use a training data. Defaults to 1000.
             latent_dim (int, optional): Number of dimensions in the latent space (vector size). Defaults to 16.
@@ -65,81 +101,60 @@ class doe_model:
             mlflow_name (str, optional): The name to log the mlflow experiment. Defaults to "Doc2Vec".
             model_type (str, optional): The model to use, either "AE" or "VAE". Defaults to "VAE".
         """
-        self.dim = dim
-        self.m = m
-        self.n = n
+        self.inp_size_base = inp_size
+        self.n_functions = n_functions
         self.kl_weight = kl_weight
         self.latent_dim = latent_dim
         self.seed = seed_nr
-        self.use_VAE = False
-        self.model_type = model_type
-        self.fitted = False
         self.loaded = False
         self.autoencoder = None
         self.functions = []
+        self.distances = []
         self.fun_save_path = f'doe_saves/functions.npy'
-        self.save_path = f'doe_saves/{self.dim}_{self.m}_{self.latent_dim}'
-        if model_type == "VAE":
-            self.use_VAE = True
-            self.pure_model_type = self.model_type
-            self.model_type = self.model_type + str(kl_weight)
+        # self.model_save_path = f'doe_saves/{self.inp_size}_{self.latent_dim}'
         seed(self.seed)
-        # generate the DOE using Sobol
-        if custom_sample is None:
-            self.sampler = qmc.Sobol(d=self.dim, scramble=False, seed=self.seed)
-            self.sample = self.sampler.random_base2(m=self.m)
-            # self.sample = np.where(self.sample == 0.0, 1e-2, self.sample)
-            self.sample = np.clip(self.sample, 0.01, 0.99)
-        else:
-            self.sample = custom_sample
-        self.use_mlflow = use_mlflow
-        if use_mlflow:
-            mlflow.set_experiment(mlflow_name)
-            mlflow.start_run(
-                run_name=f"run {self.dim}-{self.m}-{self.latent_dim}-{self.seed}"
-            )
-            mlflow.log_param("model_type", model_type)
-            mlflow.log_param("dim", self.dim)
-            mlflow.log_param("kl_weight", self.kl_weight)
-            mlflow.log_param("m", self.m)
-            mlflow.log_param("latent_dim", self.latent_dim)
-            mlflow.log_param("seed", self.seed)
-    def __str__(self):
-        return f'doe_{self.dim}-{self.m}-{self.latent_dim}'
-    
-
-    def load_or_train(self):
-        if self.loaded: return
-
-        if os.path.exists(self.fun_save_path):
-            self.functions = np.load(self.fun_save_path)
-            # self.functions = [eval('lambda array_x: '+f) for f in self.functions]
-            assert(len(self.functions)== self.n)
+        self.executor:ProcessPoolExecutor =  None
+        # worker_n = 8
+        # self.worker_conns, child_conns = list(zip(*[Pipe() for _ in range(worker_n)]))
+        # self.eval_workers = [Process(target=evaluator, args=(conn,)) for conn in child_conns]
+        # for p in self.eval_workers: p.start()
         
-        if os.path.exists(self.save_path):
-            self.autoencoder = tf.keras.models.load_model(f'{self.save_path}/model')
-            self.Y = np.load(f"{self.save_path}/y.npy")
-            self.func_mask = np.load(f"{self.save_path}/func_mask.npy")
-            self.functions = self.functions[self.func_mask]
-        else: 
-            self.generate_functions_and_data(self.functions)
-            if not os.path.exists(self.fun_save_path):
+    
+        self.train_epochs = 1
+        self.old_xs = None
+        
+
+    def __str__(self):
+        return f'doe_{self.inp_size_base}_{self.latent_dim}'
+    
+    def reset(self, dim):
+        self.inp_size = int(dim*self.inp_size_base)
+        # self.autoencoder.load_weights(f'{self.model_save_path}.h5') 
+        self.autoencoder = VAE(int(self.latent_dim*dim), self.inp_size, kl_weight=self.kl_weight)
+        self.autoencoder.compile(optimizer="adam")
+        self.distances = []
+        self.old_xs = None
+
+
+    def load_or_create(self, dim):
+        self.reset(dim)
+        if self.loaded: return self
+
+        if (self.functions is None or len(self.functions) == 0):
+            if os.path.exists(self.fun_save_path):
+                self.functions = np.load(self.fun_save_path)[:self.n_functions]
+            else:
+                self.functions = self.generate_functions(self.gen_x_sample(10), self.functions)
                 np.save(f"{self.fun_save_path}", self.functions)
-            # self.functions = [eval('lambda array_x: '+f) for f in self.functions]
-            self.compile()
-            self.fit(20)
-            os.makedirs(self.save_path)
-            self.autoencoder.save(f'{self.save_path}/model')
-            np.save(f"{self.save_path}/func_mask.npy",self.func_mask)
-            np.save(f"{self.save_path}/y.npy", self.Y)
-            
         
         self.loaded = True
+        return self
     
-    def generate_functions_and_data(self, provided_functions=[]):
+    def generate_functions(self, array_x, provided_functions=[]):
         def fun_gen():
-            for f in provided_functions:
-                yield f
+            if provided_functions is not None:
+                for f in provided_functions:
+                    yield f
             while True:
                 tree = genTree.generate_tree(6, 16)
                 exp = genTree2exp.generate_tree2exp(tree)
@@ -147,67 +162,71 @@ class doe_model:
                 fun = '('+fun + ')[:,0]'
                 yield fun
 
-        self.Y = []
-        self.functions =[] 
-        self.func_mask = []
-        
-
+        functions = [] 
+        orig_settings = np.seterr(all='raise')
         if not sys.warnoptions:
             warnings.simplefilter("ignore")
-        array_x = self.sample
         iters = 0 
         for fun in fun_gen():
-            iters_per_succ = iters/max(len(self.Y),1)
-            if len(self.func_mask) >= self.n: break
+            iters_per_succ = iters/max(len(functions),1)
+            if len(functions) >= self.n_functions: break
             iters += 1
             try:
                 array_y = eval(fun)
-                if (#nonrecoverable
+                if (
                     np.isnan(array_y).any()
                     or np.isinf(array_y).any()
                     or array_y.ndim != 1
                     or np.any(abs(array_y) < 1e-8)
-                    or np.any(abs(array_y) > 1e8)):
-                        if len(provided_functions)==self.n: 
-                            self.func_mask.append(False) 
+                    or np.any(abs(array_y) > 1e8)
+                    or len(np.unique(array_y)) < len(array_y)/1.5):
                         continue 
                 if (np.var(array_y) < 1.0):
                     if (np.var(array_y*10) < 1.0):
                         continue
                     else:
                         fun = '10*('+fun+')'
-
-                        
-                self.functions.append(fun)
-                self.Y.append(array_y)
-                self.func_mask.append(True)
-
-            except Exception as inst:
-                if len(provided_functions)==self.n:
-                    self.func_mask.append(False)
+                functions.append(fun)
+            except Exception as inst: 
                 continue
         warnings.simplefilter("default")
+        np.seterr(**orig_settings)
         # assert(len(provided_functions) == 0 or iters==self.n)
-        
-        self.Y = self.normalise_y(np.array(self.Y))
-        self.functions = np.array(self.functions)
-        self.func_mask = np.array(self.func_mask)
+        return np.array(functions)
 
-    def normalise_y(self,y):
-        # m = np.mean(y, axis=1)[:,np.newaxis]
-        # std = np.std(y,axis=1)[:,np.newaxis]
-        # std = np.where(std==0.0, 1, std)
-        # y_normed = (y-m)/std
-        mn = np.min(y,axis=1)[:,np.newaxis]
-        mx = np.max(y,axis=1)[:,np.newaxis]
-        y_normed = (y-mn)/(mx-mn)
-        return y_normed
-    
-    def compile(self):
-        self.autoencoder = VAE(self.latent_dim, self.Y.shape[1], kl_weight=self.kl_weight)
-        self.autoencoder.compile(optimizer="adam")
+    def gen_x_sample(self, dim):
+        import math
+        sampler = qmc.Sobol(d=dim, scramble=False, seed=self.seed)
+        sample = sampler.random_base2(math.ceil(math.log2(self.inp_size)))
+        sample = np.clip(sample, 0.001, 0.999)
+        np.random.default_rng(self.seed).shuffle(sample)
+        sample = sample[:self.inp_size]
+        return sample
 
-    def fit(self, epochs=100,batch_size=128, **kwargs):
+
+
+    def eval_functions(self, x):
+        assert(np.sum(np.logical_or(x<0,x>1))==0)
+        array_x = np.clip(x, 0.001, 0.999)
+        windows = list(group_list(self.functions, math.ceil(len(self.functions)/8)))
+
+
+        y = self.executor.map(eval_multiple, windows, [array_x]*len(windows))
+        y = [arr for arrs in list(y) for arr in arrs]  #flatten
+        mask = [a is not None for a in y]
+        y= np.array([a for a in y if a is not None])
+        self.functions = self.functions[mask]
+
+        valid_mask = np.sum(np.logical_or(np.isnan(y),np.isinf(y)), axis=-1)==0
+        svm = np.sum(valid_mask)
+        if svm/len(valid_mask) < 0.9:
+            print()
+            
+        self.functions = self.functions[valid_mask]
+        y = y[valid_mask,:]
+        return y
+
+    def fit(self, epochs=5,batch_size=128, val_n = 50, **kwargs):
         """Fit the autoencoder model.
 
         Args:
@@ -217,51 +236,128 @@ class doe_model:
         if self.autoencoder is None:
             raise AttributeError("Autoencoder model is not compiled yet")
 
+        # valid_mask = np.sum(np.logical_or(np.isnan(self.Y),np.isinf(self.Y)), axis=1)==0
+        # self.Y = self.Y[valid_mask,:]
+        # self.functions = self.functions[valid_mask]
+
         self.autoencoder.fit(
                 tf.cast(self.Y[:-50], tf.float32),
                 epochs=epochs,
                 batch_size=batch_size,
                 shuffle=True,
                 validation_data=((te:=tf.cast(self.Y[-50:], tf.float32)),te),
-                **kwargs,
+                **kwargs
             )
-
-    # finds the closest training function to the one provided
-    def func_approx(self, y, scale_inp=True):
-        if len(y.shape==1): 
-            y = y.reshape(1, -1)
-        latent = self.encode(y,norm=True)
-        if not self.fitted:
-            encoded_Y = self.encode(self.Y)
-            self.nn= NearestNeighbors(n_neighbors=1, algorithm="ball_tree").fit(encoded_Y)
-        if len(latent.shape==1): 
-            latent = latent.reshape(1, -1)
-        dist, i = self.nn.kneighbors(latent)
-        i = i[0]
+    
+    def train(self, train_x, train_y,opt=None):
+        # self.approximation = lambda a: np.random.default_rng().random(a.shape[0])
+        # return
+        # start_time = timer()
+        # mn = np.min(train_y)
+        # mx = np.max(train_y)
+        # train_y = (train_y - mn) / (mx-mn+(1e-4))
+        # train_y = np.clip(train_y, 0.01, 0.99)  
         
-        best_approx_str = self.functions[i][0]
+        # closest_xs = np.array(train_x)[-self.inp_size:]
+        # closest_ys = np.array(train_y)[-self.inp_size:]
+
+        train_x,train_y = np.array(train_x),np.array(train_y)
+        train_y_, inx = np.unique(train_y, return_index=True)
+        train_x_ = np.array(train_x)[inx]
+        if len(inx)>=self.inp_size:
+            train_x, train_y = train_x_, train_y_
+        eu_dist = np.linalg.norm(train_x - opt._mean.reshape([1,-1]), axis=1)
+        dists_i = np.argsort(eu_dist)[:self.inp_size]
+        closest_xs, closest_ys = train_x[dists_i], train_y[dists_i]
+        
+
+
+        xs = np.clip((closest_xs+5)/10,0.01, 0.99)
+        # mn = np.mean(closest_ys,axis=-1, keepdims=True)
+        # std = np.std(closest_ys,axis=-1, keepdims=True)
+        # closest_ys = (closest_ys - mn) / (np.where(std==0,1e-4,std))
+        mn = np.min(closest_ys)
+        mx = np.max(closest_ys)
+        closest_ys = (closest_ys - mn) / (mx-mn+(1e-4))
+        closest_ys = np.clip(closest_ys, 0.01, 0.99)
+
+        #bipartite matching to minimize changes to inputs of the autoencoder
+        if self.old_xs is not None:
+            dist_matrix = distance_matrix(self.old_xs, xs)
+            row_ind, col_ind = linear_sum_assignment(dist_matrix)
+            ordered_xs = xs[col_ind]
+            closest_ys = closest_ys[col_ind]
+            self.old_xs = ordered_xs
+        else:
+            self.old_xs = xs
+        self.Y = self.eval_functions(self.old_xs)
+        
+        # mn = np.min(y,axis=-1, keepdims=True)
+        # mx = np.max(y,axis=-1, keepdims=True)
+        # y = (y - mn) / ((mx - mn)+1e-4)
+        # y = np.clip(y, 1e-3, 0.999)
+        mn = np.min(self.Y,axis=-1, keepdims=True)
+        mx = np.max(self.Y,axis=-1, keepdims=True)
+        self.Y = (self.Y - mn) / (mx-mn+(1e-4))
+        self.Y = np.clip(self.Y, 0.01, 0.99)
+        
+        
+        # end_time = timer()
+        # elapsed = end_time - start_time
+        # print(f"evaluate funcs time: {elapsed}")
+
+        self.fit(epochs=self.train_epochs)
+        f,d = self.approximate(closest_ys, scale_inp=True)
+
+        # end_time_ = timer()
+        # elapsed = end_time_ - end_time
+        # print(f"train time: {elapsed}")
+        self.approximation = f
+        self.distances.append(d)
+
+    def __call__(self, xs):
+        return self.approximation(xs)
+    
+    def approximate(self, array_y, scale_inp=True):
+        # y evaluated from training funcs
+        training_latent = self.encode(self.Y)
+        # enc_min = np.min(training_latent,axis=0, keepdims=True)
+        # enc_max = np.max(training_latent,axis=0, keepdims=True)
+        # training_latent = (training_latent - enc_min) / ((enc_max - enc_min)+1e-4)
+        # mn = np.mean(training_latent,axis=0, keepdims=True)
+        # std = np.std(training_latent,axis=0, keepdims=True) 
+        # std = np.where(std==0, 1e-4, std)
+        # training_latent = (training_latent - mn) / std # scale each column of the latent dim to make the nearestneighbor consider each node equally
+       
+        # y from the evo algorithm
+        assert(len(array_y.shape)==1)
+        latent = self.encode(array_y)
+        if len(latent.shape)==1: 
+            latent = latent.reshape(1, -1)
+        # latent = (latent - enc_min) / ((enc_max - enc_min)+1e-4)
+        # latent = (latent - mn) / std
+
+
+        # find closest function to use as an approximation
+        eu_dists = np.linalg.norm(training_latent-latent, axis=1)
+        i = np.argmin(eu_dists)
+        mindist= eu_dists[i]
+        print('approx distance', mindist)
+        best_approx_str = self.functions[i]
         best_approx_f = eval('lambda array_x:'+best_approx_str)
 
-        # real_mean = y.mean()
-        # real_std = y.std()
-        # approx_y = self.Y[i,:]
-        # approx_y_mean = approx_y.mean()
-        # approx_y_std = approx_y.std()
 
         def run_approx(array_x):
             if (added_dim := len(array_x.shape)==1):
                 array_x = array_x[np.newaxis,:]
             if scale_inp:
                 array_x = (array_x + 5.0)/10 #scale from bbob vals to 0-1
+                array_x = np.clip(array_x, 0.01, 0.99)
             e = best_approx_f(array_x)
-            # if scale:
-            #     e = (e-approx_y_mean)/approx_y_std # approx_y 'knows' how is this func scaled, the evaluation needs to be normalised accordingly
-            #     e = e *real_std  + real_mean # take the normalised vector and turn it the real values of the true bbob func
             return e[0] if added_dim else e
-        # func_approx = lambda array_x:  #scale the apmproximation down to zero mean 1var, then scale this to the y values
-        return run_approx, dist[0]
+        return run_approx, mindist
     
-    def encode(self, y:np.ndarray, norm=False):
+    def encode(self, y:np.ndarray):
         """Encode a Design of Experiments.
 
         Args:
@@ -273,16 +369,11 @@ class doe_model:
         
         if len(y.shape) == 1:
             y = y.reshape((1,-1))
-        if norm:
-            y = self.normalise_y(y)
-
-        y = tf.cast(y, tf.float32)
-        if self.use_VAE:
-            encoded_doe, _, __ = self.autoencoder.encoder(y)
-            encoded_doe = np.array(encoded_doe)
-            encoded_doe = np.squeeze(encoded_doe)
-        else:
-            encoded_doe = self.autoencoder.encoder(y).numpy()
+        
+        y_ = tf.cast(y, tf.float32)
+        encoded_doe, _, __ = self.autoencoder.encoder(y_)
+        encoded_doe = np.array(encoded_doe)
+        encoded_doe = np.squeeze(encoded_doe)
         return encoded_doe
     
     
@@ -324,7 +415,7 @@ class doe_model:
             mlflow.log_artifact("latent_space.png", "img")
         else:
             plt.savefig(
-                f"latent_space_{self.dim}-{self.m}-{self.latent_dim}-{self.seed}-{self.model_type}.png"
+                f"latent_space_{self.m}-{self.latent_dim}-{self.seed}-{self.model_type}.png"
             )
 
     def visualizeTestData(self, n=5):

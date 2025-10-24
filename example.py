@@ -27,7 +27,7 @@ fmin = scipy.optimize.fmin
 budget_multiplier = 1  # increase to 10, 100, ...
 
 ### prepare
-suite = cocoex.Suite(suite_name, "", "")
+suite = cocoex.Suite(suite_name, "", f"function_indices:1-5 dimensions:10 instance_indices:1-2")
 observer = cocoex.Observer(suite_name, "result_folder: " + output_folder)
 minimal_print = cocoex.utilities.MiniPrint()
 
@@ -44,6 +44,8 @@ for problem in suite:  # this loop will take several minutes or longer
     minimal_print(problem, final=problem.index == len(suite) - 1)
 
 ### post-process data
+# cocopp.genericsettings.scaling_plots_with_axis_labels = False
+# cocopp.genericsettings.scaling_figures_with_boxes = False
 cocopp.main(observer.result_folder)  # re-run folders look like "...-001" etc
 webbrowser.open("file://" + os.getcwd() + "/ppdata/index.html")
 

@@ -5,9 +5,11 @@ __pycache__
 /__pycache__
 */__pycache__
 doe2vec/__pycache__
-/data
 /doe_saves
 *.pyc
 /venv
 /__pycache__
 /model
+/__pycache__
+__pycache__/evo.cpython-39.pyc
+__pycache__/main.cpython-39.pyc

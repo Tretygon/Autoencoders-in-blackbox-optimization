@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-from evo import Alternate_full_generations,Best_k,Pure, Doe
 import os
 import glob
 import numpy.ma as ma
@@ -15,149 +14,59 @@ str2arr = lambda dtype: lambda string: np.fromstring(string, dtype=dtype, sep=' 
 listmap = lambda func, collection: list(map(func, collection))
 
 
-def str2evomode(s):
-        if s.startswith("Pure"): return Pure()
-        elif s.startswith("BestK"):
-            s1 = s[len("BestK"):]
-            return Best_k(float(s1) if '.' in s1 else int(s1)) 
-        elif s.startswith("Doe"):
-            s = s[len("Doe_"):].split('&')
-            follow = str2evomode(s[0])
-            dim,power,latent = map(int,s[1].split('_'))
-            d = Doe(follow,dim,power,latent)
-            return d
-        else: raise Exception
-def str2trueRatio(s):
-            if s.startswith("Pure"): return 1
-            elif s.startswith("BestK"):
-                s1 = s[len("BestK"):]
-                return float(s1) if '.' in s1 else int(s1)
-            elif s.startswith("Doe"):
-                s = s[len("Doe_"):].split('&')[0]
-                return str2trueRatio(s) # recurse into follow_up
-            else: raise Exception
-        
 
 unzip = lambda a:list(map(list,list(zip(*a))))
 
-def store_data(df, name=None,  datastore='data/data.h5'):
+def store_data(df, desc='df'):
     if df.empty: return
 
     #ndarrays are stored separately as its way faster and takes less space
-    vals = df['vals'].to_list()
-    evals = df['evals'].to_list()
-    max_len = max(map(len, vals))
-    lenghts = np.stack((len(a) for a in vals),axis=0)
-    vals = np.stack([np.pad(a, (0,max_len - len(a)), mode='empty') for a in vals],axis=0)
-    evals = np.stack([np.pad(a, (0,max_len - len(a)), mode='empty') for a in evals],axis=0)
-    df = df.drop(columns=['vals','evals'], errors = 'ignore') 
-    
-    cs = pd_cols.all_cols.copy()
-    cs.remove('vals')
-    cs.remove('evals')
-    df = df[cs] # get rid of augmentations
-    df['evo_mode'] = df['evo_mode'].map(str)
+    # stored_separately = {}
+    # stored_normally_cols = pd_cols.all_cols.copy()
 
-    with pd.HDFStore(datastore,'a') as data_storage:
-        if name== None:
-            names = listmap(lambda a: a[1:], data_storage.keys())
-            names = [int(a) for a in names if a.isnumeric()]
-            name = max(names) if len(names)>0 else 0
-            name = str(name+1)
-        data_storage.put(name,df)
-    np.savez_compressed(f'data/{name}_numpy', vals=vals, evals=evals, lenghts=lenghts)
-
-
-# def remove(names, datastore):
-#     with pd.HDFStore(datastore,'a') as data_storage:
-#         for name in names:
-#             os.remove('data/'+name)
-#             del data_storage[name]
+    # for name in ['vals','evals','dists','correct_invariant']:
+    #     stored_normally_cols.remove(name)
+    #     arrs = df[name].to_list()
+    #     lengths = np.stack([len(a) for a in arrs],axis=0)
+    #     max_len = max(lengths)
+    #     # aligned = np.stack([np.pad(a, (0,max_len - len(a)), mode='empty') for a in arrs],axis=0)
+    #     aligned = [np.pad(a, (0,max_len - len(a)), mode='empty') for a in arrs]
+    #     df[name] = aligned
+    #     df[name+'_len'] = list(lengths)
+    #     stored_separately[name]= aligned
+    #     stored_separately[name+'_len']= lengths
 
     
-def store_as_num(data, datastore='data/data.h5'):
-    with pd.HDFStore(datastore,'a') as data_storage:
-        names = map(lambda a: a[1:], data_storage.keys())
-        max_name = max([a for a in names if a.isnumeric()])
-    store_data(data,max_name,datastore)
+    # df = df[stored_normally_cols] # get rid of augmentations and stored_separately cols
+    df = df[pd_cols.all_cols] # get rid of augmentations and stored_separately cols
+    # with pd.HDFStore(f'data/{desc}.h5','a') as data_storage:
+    #     data_storage.put('df',df)
+    np.savez_compressed(f'data/{desc}', **{c: df[c].values for c in df.columns}, allow_pickle=True)
+    # np.savez_compressed(f'data/{desc}', allow_pickle=True, **stored_separately)
 
-def load_data(target_names=None, datastore='data/data.h5'):
-    def transform(df, name):
-        loaded = np.load(f'data/{name}_numpy.npz')
-        lenghts = list(loaded['lenghts'])
-        for c in ['vals', 'evals']:
-            unstacked = list(loaded[c])
-            df[c] =  [a[:l] for a,l in zip(unstacked, lenghts)]
-        df['true_ratio'] = df['evo_mode'].map(str2trueRatio)
-        df['evo_mode'] = df['evo_mode'].map(str2evomode)
-        return df
-    try:
-        with pd.HDFStore(datastore,'r') as data_storage:
-            if isinstance(target_names, (str, bytes, bytearray)): # target_name is a string
-                return transform(data_storage[str(target_names)], str(target_names))
-            else: # array of names or None == accept all available
-                slices = []
-                keys = data_storage.keys()
-
-                if target_names == None:
-                    check_if_needed = lambda a: True 
-                else: 
-                    target_names = set(target_names)
-                    check_if_needed = lambda a: a in target_names
-
-                for name in keys:
-                    name = name[1:]
-                    if check_if_needed(name):
-                        df = transform(data_storage[name], name)
-                        slices.append(df)
-                return pd.concat(slices, ignore_index=True) if len(slices)>0 else None
-    except FileNotFoundError:
-        return None
-    
-# def load_old(target_name=None, datastore='data/data.h5'):
-#     from pandarallel import pandarallel
-#     pandarallel.initialize(progress_bar=True)
-#     def transform(df, name):
-#         df['vals'] = df['vals'].parallel_map(str2arr(float))
-#         df['evals'] = df['evals'].parallel_map(str2arr(int))
-#         df['true_ratio'] = df['evo_mode'].map(str2trueRatio)
-#         df['evo_mode'] = df['evo_mode'].map(str2evomode)
-#         return df
-#     try:
-        
-        
-#         with pd.HDFStore(datastore,'r') as data_storage:
-#             if target_name != None: 
-#                 return transform(data_storage[str(target_name)], str(target_name))
-#             else:
-#                 slices = []
-#                 keys = data_storage.keys()
-#                 for name in keys:
-#                     name = name[1:]
-#                     df = transform(data_storage[name], name)
-#                     slices.append(df)
-#                 return pd.concat(slices, ignore_index=True) if len(slices)>0 else None
-#     except FileNotFoundError:
-#         return None         
-    
-
-def map_all(f,datastore='data/data.h5'):
-    df = load_data(datastore=datastore)
-    df = f(df)
-    store_data(df, 'df', datastore=datastore)
-
-def merge_and_load(datastore='data/data.h5', data_glob='data/*'):
-    df = load_data(datastore=datastore)
-    files = glob.glob(data_glob)
-    if len(files)>2:
-        for f in files:
-            os.remove(f)
-        store_data(df, 'df', datastore)
+def merge_and_load():
+    numpy_files = glob.glob('data/*.npz')
+    dfs = []
+    for npz in numpy_files:
+        data = np.load(npz, allow_pickle=True)
+        df = pd.DataFrame({file: data[file] for file in data.files})
+        dfs.append(df)
+        data.close()
+    if len(numpy_files)>0:
+        del data   
+    aaa = np.load('doe_saves/aaa.npz', allow_pickle=True)
+    df = pd.concat(dfs, ignore_index=True) if len(dfs)>0 else None
+    if len(numpy_files)>1:
+        overwrite(df)
     return df
-
-def overwrite(df,datastore='data/data.h5', data_glob='data/*'):
-    files = glob.glob(data_glob)
-    for f in files:
+    
+def overwrite(df):
+    if os.path.exists('data/df.npz'):
+        os.remove('data/df.npz')
+    numpy_files = glob.glob('data/*.npz')
+    store_data(df)
+    for f in numpy_files:
+        if f == 'data/df.npz' or f == 'data\\df.npz':
+            continue
         os.remove(f)
-    store_data(df, 'df', datastore)
-    return df
+    

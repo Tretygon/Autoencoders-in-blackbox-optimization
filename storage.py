@@ -10,12 +10,15 @@ from doe2vec.doe2vec import doe_model
 def arr2str(arr): 
     import numpy as np
     return np.array2string(arr,max_line_width=np.inf, separator=' ')[1:-1]
-str2arr = lambda dtype: lambda string: np.fromstring(string, dtype=dtype, sep=' ')
-listmap = lambda func, collection: list(map(func, collection))
+def str2arr(dtype):
+    return lambda string: np.fromstring(string, dtype=dtype, sep=' ')
+def listmap(func, collection):
+    return list(map(func, collection))
 
 
 
-unzip = lambda a:list(map(list,list(zip(*a))))
+def unzip(a):
+    return list(map(list,list(zip(*a))))
 
 def store_data(df, desc='df'):
     if df.empty: return
@@ -54,7 +57,6 @@ def merge_and_load():
         data.close()
     if len(numpy_files)>0:
         del data   
-    aaa = np.load('doe_saves/aaa.npz', allow_pickle=True)
     df = pd.concat(dfs, ignore_index=True) if len(dfs)>0 else None
     if len(numpy_files)>1:
         overwrite(df)

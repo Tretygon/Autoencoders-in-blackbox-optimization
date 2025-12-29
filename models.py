@@ -6,7 +6,6 @@ from sklearn.gaussian_process.kernels import RBF
 import numpy as np
 import tensorflow as tf
 from sklearn.decomposition import PCA
-import tensorflow_addons as tfa
 import sklearn.gaussian_process.kernels as GPK
 import progress_bar
 import math
@@ -18,7 +17,6 @@ from rbf_layer import RBFLayer
 import scipy
 
 
-import GPy
 
 
 
@@ -38,7 +36,7 @@ def vae(l,x,model):
     if model == None:
         model= VAE.VAE(d,l)
         model.compile()
-    model.fit(x,x,batch_size = int(x.shape[0]/20),epochs=3,verbose=0)
+    model.fit(x,x,batch_size = int(x.shape[0]/10),epochs=2,verbose=0)
     return model
 
 
@@ -66,7 +64,7 @@ def elm(h,x,y,model):
     hidden_size = int(h*inp_size)
     input_weights = tf.random.normal([inp_size,hidden_size])
     biases = tf.random.normal([hidden_size])
-    h = lambda a: tf.nn.silu(tf.tensordot(a,input_weights,1) + biases)
+    h = lambda a: tf.nn.relu(tf.tensordot(a,input_weights,1) + biases)
     # h = lambda a: tf.nn.relu(tf.tensordot(a,input_weights,1) + biases)
     output_weights = tf.tensordot(tf.linalg.pinv(h(tf.cast(x,tf.float32))), tf.cast(y,tf.float32),1)
     inp = tf.keras.layers.Input(shape=inp_size)
@@ -88,7 +86,7 @@ def rbf_network(layers,gamma,x,y,model):
         outp = tf.squeeze(outp,-1)
         model = tf.keras.Model(inputs=inp,outputs=outp)
 
-        model.compile(optimizer=tfa.optimizers.AdamW(1e-3),loss = 'mse')
+        model.compile(optimizer=tf.keras.optimizers.Adam(1e-3),loss = 'mse')
     model.fit(x,y,batch_size = int(x.shape[0]/20),epochs=3,verbose=0)
     return model
 
@@ -105,7 +103,7 @@ def mlp(layers,x,y,model):
         outp = tf.keras.layers.Dense(1)(feed)
         outp = tf.squeeze(outp,-1)
         model = tf.keras.Model(inputs=inp,outputs=outp)
-        model.compile(optimizer=tfa.optimizers.AdamW(1e-3),loss = 'mse')
+        model.compile(optimizer=tf.keras.optimizers.Adam(1e-3),loss = 'mse')
     model.fit(x,y,batch_size = int(x.shape[0]/10),epochs=5,verbose=0)
     return model
 
@@ -122,26 +120,26 @@ def nearest(k,x,y,model):
 
 
 
-class Ansamble :
-    @staticmethod 
-    def create(combination_f, models):
-        listmap = lambda func, collection: list(map(func, collection))
-        self = Ansamble()
-        self.combination_f = combination_f
-        self.model_fs = listmap(lambda a: a[0], models)
-        self.model_descs = listmap(lambda a: a[1], models)
-        self.old_models = listmap(lambda _: None, self.model_fs)
-        return (
-            self,
-            'ansamble_[' + '&'.join(self.model_descs) + ']'
-        )
-    def __call__(self, data):
-            called = [m(data) for m in self.models]
-            stacked = np.stack(called,0),
-            combined = self.combination_f(stacked, axis=0)
-            return combined 
-    def train(self,x,y):
-        self.models = [f(h,x,y,m_old) for (f,m_old) in zip(self.model_fs,self.models)]
+# class Ansamble :
+#     @staticmethod 
+#     def create(combination_f, models):
+#         listmap = lambda func, collection: list(map(func, collection))
+#         self = Ansamble()
+#         self.combination_f = combination_f
+#         self.model_fs = listmap(lambda a: a[0], models)
+#         self.model_descs = listmap(lambda a: a[1], models)
+#         self.old_models = listmap(lambda _: None, self.model_fs)
+#         return (
+#             self,
+#             'ansamble_[' + '&'.join(self.model_descs) + ']'
+#         )
+#     def __call__(self, data):
+#             called = [m(data) for m in self.models]
+#             stacked = np.stack(called,0),
+#             combined = self.combination_f(stacked, axis=0)
+#             return combined 
+#     def train(self,x,y):
+#         self.models = [f(h,x,y,m_old) for (f,m_old) in zip(self.model_fs,self.models)]
 
 
 
@@ -158,8 +156,8 @@ class Surrogate:
         self.inp_size = min_pop
     def __call__(self,x):
             if self.is_id: return np.zeros(x.shape[0])
-            latent = self.dim_red(x)
-            y = self.model(latent)
+            latent = self.dim_red(x)  # ty:ignore[call-non-callable]
+            y = self.model(latent)  # ty:ignore[call-non-callable]
             y = np.nan_to_num(y, nan=4.9)
             return y
     

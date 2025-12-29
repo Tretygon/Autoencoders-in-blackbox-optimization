@@ -1,0 +1,20 @@
+[project]
+name = "diplomka"
+version = "0.1.0"
+description = ""
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "cma==3.4.0",
+    "cmaes==0.10.0",
+    "coco-experiment==2.6.99rc2",
+    "cocopp==2.6.3",
+    "ruff>=0.14.10",
+    "tensorflow>=2.20.0",
+    "ty>=0.0.5",
+    "seaborn",
+    "pandas", 
+    "tensorflow",
+    "scipy",
+    "scikit-posthocs",
+]

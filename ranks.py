@@ -1,5 +1,7 @@
-import os, webbrowser
-import cocoex, cocopp
+import os
+import webbrowser
+import cocoex
+import cocopp
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -199,7 +201,6 @@ def plot_ranks(df, window_size = 5):
 def coco_plot(out_folders):
     
     ### coco plotting 
-    aa = cocopp.bbob
     # cocopp.genericsettings.background = {None: cocopp.bbob.get_all("2009/")}
     cocopp.genericsettings.isExpensive = True
     cocopp.genericsettings.xlimit_expensive = 250.0

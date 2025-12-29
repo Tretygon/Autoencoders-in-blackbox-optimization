@@ -1,18 +1,11 @@
 import numpy as np
-from cmaes import CMA,SepCMA,CMAwM
+from cmaes import CMA
 import cma
 # from cma.purecma import CMAES
 # from cma_custom import CMA
-import tensorflow as tf
 #cocoex.solvers.random_search
-from sklearn.decomposition import PCA
-import math
 import progress_bar
-from tqdm import tqdm
-from typing import Union,List
-from dataclasses import dataclass
 from scipy import stats
-from sklearn.preprocessing import StandardScaler
 
 import cocoex
 from cma.fitness_models import SurrogatePopulation
@@ -131,7 +124,7 @@ def optimize(problem, surrogate, pop_size, true_evals, gen_mult:int, printing=Tr
             idx = np.argsort(ys)
             top_k_xs = xs[idx][:k_accepted]  
             top_k_ys = eval_true(top_k_xs)
-            if true_evals_left >0: # at the end of algo; optim complains the solutions have diff len than popsize
+            if true_evals_left >0: # at the end of algo; optim complains the solutions have diff len than popsize; wont continue, so no need to tell optimizer anyway
                 optimizer.tell(list(zip(top_k_xs,top_k_ys))) 
                 surrogate.train(true_xs,true_ys, opt=optimizer)
                 

@@ -42,8 +42,14 @@ from itertools import takewhile,dropwhile
 matplotlib.use('TkAgg')
 os.environ['KERAS_BACKEND'] = 'tensorflow'
 
-# tf.config.run_functions_eagerly(True)
-# tf.keras.backend.set_floatx('float16')
+if not os.path.exists('./doe_saves'):
+    os.makedirs('./doe_saves')
+if not os.path.exists('./data'):
+    os.makedirs('./data')
+if not os.path.exists('./exdata'):
+    os.makedirs('./exdata')
+    # tf.config.run_functions_eagerly(True)
+    # tf.keras.backend.set_floatx('float16')
 
 #
 # num of sampling points 
@@ -84,7 +90,7 @@ def plot(df=None):
 note = ''
 def run(df=None):
     # global dim, budget
-    problem_info = f"function_indices:1-24 dimensions:2,5,10 instance_indices:1-3"
+    problem_info = f"function_indices:1-24 dimensions:2,5,10 instance_indices:1-10"
    
     vae = lambda layers: (p(models.vae,layers), f'vae{layers}')
     pca = lambda n: (p(models.pca,n), f'pca{n}')
@@ -102,12 +108,13 @@ def run(df=None):
 
     configs = [ 
         ## pop_size, evolution_eval_mode, dim_reduction, model,budget, train_num, sort_train, scale_train, cma_sees_approximations
-        [None, 4, None, gp],  
         [None, 4, None, doe(16, 4)],  
-        [None, 4, None, nearest(1)],
+        [None,1,None,None],
+        [None, 4, None, gp],  
         [None, 4, None, nearest(3)],
-        [None, 4, None, nearest(2)],
-        [None,1,None,None]
+        [None, 4, None, elm(100)],
+        #[None, 4, None, nearest(1)],
+        #[None, 4, None, nearest(2)],
     #     [None, 2,None, doe(32, 4)],
     #     [None, 2,None, doe(32, 16)],
     #     [None, 2,None, doe(32, 32)],
@@ -226,7 +233,13 @@ if __name__ == '__main__':
     # datastore_store(load_data(),'w')
 
     df_og = storage.merge_and_load()
-    df_og = run(df_og)
+    # df_og = run(df_og)
 
     # from doe2vec import exp_bbob
+
+
+    df = df_og.copy()
+    df = df[df['note']=='']
+    out_folders = df['coco_directory'].unique().tolist()
+    ranks.coco_plot(out_folders)
    
